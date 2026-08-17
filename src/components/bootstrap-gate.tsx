@@ -29,6 +29,23 @@ type BootstrapStatus = {
   };
 };
 
+const EMPTY_COUNTS = {
+  customers: 0,
+  orders: 0,
+  products: 0,
+  vehicles: 0,
+  recommendations: 0,
+  revenue: 0,
+};
+
+const EMPTY_STATUS: BootstrapStatus = {
+  ready: false,
+  netoConfigured: true,
+  needsSync: true,
+  job: null,
+  counts: EMPTY_COUNTS,
+};
+
 const STEPS = [
   { key: "products", label: "Products" },
   { key: "orders", label: "Orders & customers" },
@@ -50,11 +67,22 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(true);
 
+  async function readJson(res: Response) {
+    const text = await res.text();
+    if (!text.trim()) return {} as BootstrapStatus & { error?: string };
+    try {
+      return JSON.parse(text) as BootstrapStatus & { error?: string };
+    } catch {
+      throw new Error("The app returned an invalid response. Redeploy Railway and try again.");
+    }
+  }
+
   async function load(startIfNeeded = false) {
     try {
       const res = await fetch("/api/bootstrap");
-      const data = (await res.json()) as BootstrapStatus & { error?: string };
+      const data = await readJson(res);
       if (!res.ok) {
+        setStatus((current) => current ?? { ...EMPTY_STATUS, netoConfigured: data.netoConfigured ?? false, needsSync: true, ready: false, job: null });
         setError(data.error ?? "Could not check Aveska sync");
         setChecking(false);
         return data;
@@ -121,9 +149,9 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
           Please wait while we sync products, customers, orders, revenue, and vehicles from aveska.com.au.
           The dashboard opens when this finishes.
         </p>
-        {!status?.netoConfigured && !checking ? (
+        {status && !status.netoConfigured ? (
           <p className="mt-4 text-sm text-danger">
-            NETO_API_KEY is missing on this host. Add it to Railway Variables, redeploy, then refresh.
+            This running app does not have NETO_API_KEY yet. After adding it on the aveska service, click Redeploy, then refresh.
           </p>
         ) : null}
         {status?.job?.message ? <p className="mt-4 text-sm text-foreground">{status.job.message}</p> : null}

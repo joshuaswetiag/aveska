@@ -26,30 +26,50 @@ async function counts() {
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  startJobWorker();
-  const netoConfigured = Boolean(process.env.NETO_API_KEY?.trim());
-  const stats = await counts();
-  let job = null as Awaited<ReturnType<typeof ensureFullSyncQueued>>;
-  if (netoConfigured) {
-    job = await ensureFullSyncQueued(session.user.id);
-    if (job && (job.status === "QUEUED" || job.status === "FAILED")) runJobInBackground(job.id);
+  try {
+    const session = await auth();
+    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const netoConfigured = Boolean(process.env.NETO_API_KEY?.trim());
+    const stats = await counts();
+    startJobWorker();
+    let job = null as Awaited<ReturnType<typeof ensureFullSyncQueued>>;
+    if (netoConfigured) {
+      try {
+        job = await ensureFullSyncQueued(session.user.id);
+        if (job && (job.status === "QUEUED" || job.status === "FAILED")) runJobInBackground(job.id);
+      } catch (error) {
+        console.error("Could not queue full sync", error);
+      }
+    }
+    const fullJobs = await listFullSyncJobs().catch(() => []);
+    const active = fullJobs.find((row) => row.status === "QUEUED" || row.status === "RUNNING") ?? null;
+    const completed = fullJobs.find((row) => row.status === "COMPLETED") ?? null;
+    const failed = !active ? fullJobs.find((row) => row.status === "FAILED") ?? null : null;
+    const ready = !active && Boolean(completed) && stats.products > 0 && stats.orders > 0;
+    return NextResponse.json({
+      ready,
+      netoConfigured,
+      needsSync: !ready,
+      job: active ?? failed ?? completed ?? job,
+      counts: stats,
+      from: FULL_SYNC_FROM,
+      to: storeIsoDate(),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Bootstrap check failed";
+    console.error("GET /api/bootstrap", error);
+    return NextResponse.json(
+      {
+        error: message,
+        ready: false,
+        netoConfigured: Boolean(process.env.NETO_API_KEY?.trim()),
+        needsSync: true,
+        job: null,
+        counts: { customers: 0, orders: 0, products: 0, vehicles: 0, recommendations: 0, revenue: 0 },
+      },
+      { status: 500 },
+    );
   }
-  const fullJobs = await listFullSyncJobs();
-  const active = fullJobs.find((row) => row.status === "QUEUED" || row.status === "RUNNING") ?? null;
-  const completed = fullJobs.find((row) => row.status === "COMPLETED") ?? null;
-  const failed = !active ? fullJobs.find((row) => row.status === "FAILED") ?? null : null;
-  const ready = !active && Boolean(completed) && stats.products > 0 && stats.orders > 0;
-  return NextResponse.json({
-    ready,
-    netoConfigured,
-    needsSync: !ready,
-    job: active ?? failed ?? completed ?? job,
-    counts: stats,
-    from: FULL_SYNC_FROM,
-    to: storeIsoDate(),
-  });
 }
 
 export async function POST(request: Request) {
