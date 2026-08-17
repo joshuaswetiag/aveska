@@ -120,7 +120,7 @@ function stockStatus(item: NetoItem): StockStatus {
 
 export async function netoRequest<T>(action: string, body: object): Promise<NetoResponse<T>> {
   const url = process.env.NETO_API_URL || "https://www.aveska.com.au/do/WS/NetoAPI";
-  const key = process.env.NETO_API_KEY;
+  const key = process.env.NETO_API_KEY?.trim();
   if (!key) throw new Error("NETO_API_KEY is not set in .env");
 
   const headers: Record<string, string> = {
@@ -129,8 +129,8 @@ export async function netoRequest<T>(action: string, body: object): Promise<Neto
     NETOAPI_ACTION: action,
     NETOAPI_KEY: key,
   };
-  if (process.env.NETO_API_USERNAME) {
-    headers.NETOAPI_USERNAME = process.env.NETO_API_USERNAME;
+  if (process.env.NETO_API_USERNAME?.trim()) {
+    headers.NETOAPI_USERNAME = process.env.NETO_API_USERNAME.trim();
   }
 
   const response = await fetch(url, {

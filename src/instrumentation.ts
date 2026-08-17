@@ -9,4 +9,10 @@ export async function register() {
   }
   const { startJobWorker } = await import("@/lib/jobs/worker");
   startJobWorker();
+  try {
+    const { ensureFullSyncQueued } = await import("@/lib/catalogue/full-sync");
+    await ensureFullSyncQueued();
+  } catch (error) {
+    console.error("Could not queue full Aveska sync", error);
+  }
 }

@@ -48,29 +48,36 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
   const started = useRef(false);
   const [status, setStatus] = useState<BootstrapStatus | null>(null);
   const [error, setError] = useState("");
+  const [checking, setChecking] = useState(true);
 
   async function load(startIfNeeded = false) {
-    const res = await fetch("/api/bootstrap");
-    const data = (await res.json()) as BootstrapStatus & { error?: string };
-    if (!res.ok) {
-      setError(data.error ?? "Could not check Aveska sync");
+    try {
+      const res = await fetch("/api/bootstrap");
+      const data = (await res.json()) as BootstrapStatus & { error?: string };
+      if (!res.ok) {
+        setError(data.error ?? "Could not check Aveska sync");
+        setChecking(false);
+        return data;
+      }
+      setStatus(data);
+      setError("");
+      setChecking(false);
+      if (startIfNeeded && data.netoConfigured && data.needsSync) {
+        await fetch("/api/bootstrap", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        }).catch(() => undefined);
+        if (data.job?.id) {
+          await fetch(`/api/jobs/${data.job.id}/process`, { method: "POST" }).catch(() => undefined);
+        }
+      }
       return data;
+    } catch (err) {
+      setChecking(false);
+      setError(err instanceof Error ? err.message : "Could not reach the sync API");
+      return null;
     }
-    setStatus(data);
-    setError("");
-    if (startIfNeeded && data.netoConfigured && data.needsSync && !data.job) {
-      const start = await fetch("/api/bootstrap", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      const startedJob = await start.json();
-      if (!start.ok) setError(startedJob.error ?? "Could not start store sync");
-      else await load(false);
-    } else if (startIfNeeded && data.job && (data.job.status === "QUEUED" || data.job.status === "FAILED")) {
-      await fetch(`/api/jobs/${data.job.id}/process`, { method: "POST" }).catch(() => undefined);
-    }
-    return data;
   }
 
   useEffect(() => {
@@ -90,10 +97,18 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
     return () => clearInterval(timer);
   }, [status?.ready, status?.job?.id, status?.job?.status, router]);
 
-  if (!status || status.ready) return <>{children}</>;
+  if (status?.ready) return <>{children}</>;
 
-  const progress = status.job?.total ? Math.round((status.job.progress / status.job.total) * 100) : 0;
-  const failed = status.job?.status === "FAILED";
+  const progress = status?.job?.total ? Math.round((status.job.progress / status.job.total) * 100) : 0;
+  const failed = status?.job?.status === "FAILED";
+  const counts = status?.counts ?? {
+    customers: 0,
+    orders: 0,
+    products: 0,
+    vehicles: 0,
+    recommendations: 0,
+    revenue: 0,
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f3d46] px-4">
@@ -106,12 +121,13 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
           Please wait while we sync products, customers, orders, revenue, and vehicles from aveska.com.au.
           The dashboard opens when this finishes.
         </p>
-        {!status.netoConfigured ? (
+        {!status?.netoConfigured && !checking ? (
           <p className="mt-4 text-sm text-danger">
             NETO_API_KEY is missing on this host. Add it to Railway Variables, redeploy, then refresh.
           </p>
         ) : null}
-        {status.job?.message ? <p className="mt-4 text-sm text-foreground">{status.job.message}</p> : null}
+        {status?.job?.message ? <p className="mt-4 text-sm text-foreground">{status.job.message}</p> : null}
+        {checking && !status ? <p className="mt-4 text-sm text-foreground">Starting full Aveska sync…</p> : null}
         <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
           <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${Math.max(progress, 4)}%` }} />
         </div>
@@ -132,32 +148,32 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
         <dl className="mt-6 grid grid-cols-2 gap-3 text-sm">
           <div>
             <dt className="text-xs text-muted-foreground">Products</dt>
-            <dd className="font-display text-lg">{status.counts.products.toLocaleString()}</dd>
+            <dd className="font-display text-lg">{counts.products.toLocaleString()}</dd>
           </div>
           <div>
             <dt className="text-xs text-muted-foreground">Orders</dt>
-            <dd className="font-display text-lg">{status.counts.orders.toLocaleString()}</dd>
+            <dd className="font-display text-lg">{counts.orders.toLocaleString()}</dd>
           </div>
           <div>
             <dt className="text-xs text-muted-foreground">Customers</dt>
-            <dd className="font-display text-lg">{status.counts.customers.toLocaleString()}</dd>
+            <dd className="font-display text-lg">{counts.customers.toLocaleString()}</dd>
           </div>
           <div>
             <dt className="text-xs text-muted-foreground">Vehicles</dt>
-            <dd className="font-display text-lg">{status.counts.vehicles.toLocaleString()}</dd>
+            <dd className="font-display text-lg">{counts.vehicles.toLocaleString()}</dd>
           </div>
           <div>
             <dt className="text-xs text-muted-foreground">Revenue</dt>
-            <dd className="font-display text-lg">{formatCurrency(status.counts.revenue)}</dd>
+            <dd className="font-display text-lg">{formatCurrency(counts.revenue)}</dd>
           </div>
           <div>
             <dt className="text-xs text-muted-foreground">Recommendations</dt>
-            <dd className="font-display text-lg">{status.counts.recommendations.toLocaleString()}</dd>
+            <dd className="font-display text-lg">{counts.recommendations.toLocaleString()}</dd>
           </div>
         </dl>
         {failed || error ? (
           <div className="mt-5 space-y-3">
-            <p className="text-sm text-danger">{error || status.job?.errorMessage || "Sync failed"}</p>
+            <p className="text-sm text-danger">{error || status?.job?.errorMessage || "Sync failed"}</p>
             <Button
               onClick={async () => {
                 started.current = false;

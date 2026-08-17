@@ -1,4 +1,6 @@
 import { storeIsoDate } from "@/lib/utils";
+import { prisma } from "@/lib/db";
+import { enqueueJob } from "@/lib/jobs/queue";
 import { syncNetoCatalogue } from "@/lib/catalogue/neto";
 import { syncNetoOrders } from "@/lib/catalogue/neto-orders";
 import { extractCatalogueFitments, extractOrderVehicles } from "@/lib/vehicle/persist";
@@ -57,4 +59,29 @@ export async function syncFullAveskaStore(
 
   await onProgress?.(100, 100, "Aveska store loaded");
   return { catalogue, orders, recommendations, from, to };
+}
+
+export async function listFullSyncJobs() {
+  const jobs = await prisma.job.findMany({
+    where: { type: "NETO_SYNC" },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+  return jobs.filter((job) => isFullSyncJob(job.payload));
+}
+
+export async function ensureFullSyncQueued(createdById?: string, force = false) {
+  if (!process.env.NETO_API_KEY?.trim()) return null;
+  const fullJobs = await listFullSyncJobs();
+  const active = fullJobs.find((job) => job.status === "QUEUED" || job.status === "RUNNING");
+  if (active) return active;
+  const [products, orders] = await Promise.all([prisma.product.count(), prisma.order.count()]);
+  const completed = fullJobs.find((job) => job.status === "COMPLETED");
+  if (!force && completed && products > 0 && orders > 0) return completed;
+  return enqueueJob({
+    type: "NETO_SYNC",
+    payload: { kind: "full", from: FULL_SYNC_FROM, to: storeIsoDate() },
+    createdById,
+    total: 100,
+  });
 }
