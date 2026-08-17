@@ -58,6 +58,8 @@ export async function GET() {
     const session = await auth();
     if (!session?.user) return json({ error: "Unauthorized" }, 401);
     startJobWorker();
+    const { ensureJobTypeEnum } = await import("@/lib/ensure-job-types");
+    await ensureJobTypeEnum();
     const netoConfigured = Boolean(process.env.NETO_API_KEY?.trim());
     const stats = await counts();
     let job = null as Awaited<ReturnType<typeof ensureFullSyncQueued>>;
@@ -114,6 +116,8 @@ export async function POST(request: Request) {
   }
   const body = (await request.json().catch(() => ({}))) as { force?: boolean };
   startJobWorker();
+  const { ensureJobTypeEnum } = await import("@/lib/ensure-job-types");
+  await ensureJobTypeEnum();
   const stats = await counts();
   try {
     const job = await ensureFullSyncQueued(session.user.id, Boolean(body.force));
