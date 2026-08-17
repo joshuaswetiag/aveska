@@ -44,7 +44,8 @@ export async function processNextJob(jobId?: string) {
   if (inflight.has(job.id)) return job.id;
   if (job.status === "RUNNING") {
     const staleMs = Date.now() - job.updatedAt.getTime();
-    if (staleMs < 90_000) return job.id;
+    const sendStuck = job.type === "SEND_CAMPAIGN" && job.progress === 0 && staleMs > 45_000;
+    if (!sendStuck && staleMs < 90_000) return job.id;
   }
   inflight.add(job.id);
 
@@ -130,6 +131,7 @@ export async function processNextJob(jobId?: string) {
     } else if (job.type === "SEND_CAMPAIGN") {
       const payload = (job.payload ?? {}) as { campaignId?: string; testTo?: string; recipientId?: string };
       if (!payload.campaignId) throw new Error("Send job is missing campaignId");
+      await progress(0, job.total || 1, "Loading campaign…");
       const { sendCampaign } = await import("@/lib/campaign/send");
       result = await sendCampaign(payload.campaignId, {
         testTo: payload.testTo,

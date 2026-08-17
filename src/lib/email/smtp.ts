@@ -1,5 +1,3 @@
-import "server-only";
-
 import nodemailer from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import type { EmailProvider } from "@/lib/email/provider";
@@ -36,6 +34,10 @@ function smtpOptions(stored: StoredMailSettings | null): SMTPTransport.Options {
     port: config.port,
     secure: config.secure,
     auth: config.user ? { user: config.user, pass: getMailPassword(stored) } : undefined,
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 30_000,
+    tls: { minVersion: "TLSv1.2" },
   };
 }
 
@@ -70,17 +72,22 @@ export class SmtpEmailProvider implements EmailProvider {
     this.stored = stored;
     const config = getMailConfig(stored);
     const outbound = htmlWithInlineLogo(payload.html);
-    const info = await nodemailer.createTransport(smtpOptions(stored)).sendMail({
-      from: payload.from || formatFromHeader(config),
-      to: payload.to,
-      subject: payload.subject,
-      html: outbound.html,
-      text: htmlToText(outbound.html),
-      attachments: outbound.attachments,
-      replyTo: config.replyTo || undefined,
-      headers: this.extraHeaders(payload.subject),
-    });
-    return { id: String(info.messageId || info.response || `smtp-${Date.now()}`) };
+    try {
+      const info = await nodemailer.createTransport(smtpOptions(stored)).sendMail({
+        from: payload.from || formatFromHeader(config),
+        to: payload.to,
+        subject: payload.subject,
+        html: outbound.html,
+        text: htmlToText(outbound.html),
+        attachments: outbound.attachments,
+        replyTo: config.replyTo || undefined,
+        headers: this.extraHeaders(payload.subject),
+      });
+      return { id: String(info.messageId || info.response || `smtp-${Date.now()}`) };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Could not send via ${config.host}:${config.port}: ${detail}`);
+    }
   }
 
   async sendBatch(payloads: Array<{ to: string; subject: string; html: string; from?: string }>): Promise<{ ids: string[] }> {
