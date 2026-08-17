@@ -89,6 +89,15 @@ export function parseDate(value: unknown): Date | null {
 
 export const STORE_TIMEZONE = "Australia/Sydney";
 
+export function storeIsoDate(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: STORE_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
 function timeZoneOffsetMs(date: Date, timeZone: string): number {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("en-US", {

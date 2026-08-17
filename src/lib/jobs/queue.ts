@@ -99,7 +99,10 @@ export async function processNextJob(jobId?: string) {
       result = { campaignId: campaign.id, recipients, ...stats };
     } else if (job.type === "NETO_SYNC") {
       const payload = (job.payload ?? {}) as { kind?: string; from?: string; to?: string };
-      if (payload.kind === "orders") {
+      if (payload.kind === "full") {
+        const { syncFullAveskaStore } = await import("@/lib/catalogue/full-sync");
+        result = await syncFullAveskaStore(progress);
+      } else if (payload.kind === "orders") {
         const { syncNetoOrders } = await import("@/lib/catalogue/neto-orders");
         result = await syncNetoOrders(progress, { from: payload.from, to: payload.to });
       } else {

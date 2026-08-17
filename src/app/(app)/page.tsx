@@ -3,6 +3,7 @@ import { formatCurrency } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DashboardCharts } from "@/components/dashboard-charts";
 import { AnalyseButton, DemoButton } from "@/components/analyse-button";
+import { SyncAllButton } from "@/components/sync-all-button";
 
 export default async function DashboardPage() {
   const [
@@ -73,6 +74,7 @@ export default async function DashboardPage() {
         </div>
         <div className="flex gap-2">
           <DemoButton />
+          <SyncAllButton />
           <AnalyseButton />
         </div>
       </div>
