@@ -73,10 +73,14 @@ export async function syncFullAveskaStore(
   }
 
   let recommendations: unknown = { skipped: true, recommendations: recCount };
-  if (options?.refreshNeto || recCount < 1000) {
+  const pendingRecCustomers = await prisma.customer.count({
+    where: { vehicles: { some: {} }, recommendations: { none: {} } },
+  });
+  if (options?.refreshNeto || pendingRecCustomers > 0) {
     await onProgress?.(91, 100, "Building customer recommendations…");
     recommendations = await generateRecommendations({
       skipSegments: true,
+      resume: true,
       onProgress: async (done, total) => {
         await onProgress?.(
           91 + Math.round((done / Math.max(total, 1)) * 8),
@@ -116,14 +120,14 @@ export async function ensureFullSyncQueued(createdById?: string, force = false) 
   const fullJobs = await listFullSyncJobs();
   const active = fullJobs.find((job) => job.status === "QUEUED" || job.status === "RUNNING");
   if (active) return active;
-  const [products, orders, recommendations] = await Promise.all([
+  const [products, orders, pendingRecCustomers] = await Promise.all([
     prisma.product.count(),
     prisma.order.count(),
-    prisma.recommendation.count(),
+    prisma.customer.count({ where: { vehicles: { some: {} }, recommendations: { none: {} } } }),
   ]);
   const completed = fullJobs.find((job) => job.status === "COMPLETED");
-  if (!force && completed && products > 0 && orders > 0) return completed;
-  if (!force && products > 0 && orders > 0 && recommendations > 0) return completed ?? null;
+  if (!force && completed && products > 0 && orders > 0 && pendingRecCustomers < 50) return completed;
+  if (!force && products > 0 && orders > 0 && pendingRecCustomers < 50) return completed ?? null;
   return enqueueJob({
     type: "NETO_SYNC",
     payload: { kind: "full", from: FULL_SYNC_FROM, to: storeIsoDate() },

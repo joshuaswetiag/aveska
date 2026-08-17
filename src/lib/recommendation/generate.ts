@@ -29,6 +29,7 @@ export async function generateRecommendations(options?: {
   customerId?: string;
   onProgress?: (done: number, total: number) => Promise<void>;
   skipSegments?: boolean;
+  resume?: boolean;
 }) {
   const settings = await prisma.settings.upsert({
     where: { id: "default" },
@@ -41,19 +42,58 @@ export async function generateRecommendations(options?: {
   const products = await prisma.product.findMany({
     include: { fitments: true, overrides: true },
   });
+  const productsByMake = new Map<string, typeof products>();
+  const productsByVehicle = new Map<string, typeof products>();
+  for (const product of products) {
+    if (product.make) {
+      const key = product.make.toLowerCase();
+      const list = productsByMake.get(key) ?? [];
+      list.push(product);
+      productsByMake.set(key, list);
+    }
+    for (const fitment of product.fitments) {
+      if (fitment.isNegative) continue;
+      const list = productsByVehicle.get(fitment.vehicleId) ?? [];
+      list.push(product);
+      productsByVehicle.set(fitment.vehicleId, list);
+    }
+  }
 
-  const customerWhere = options?.customerId ? { id: options.customerId } : { vehicles: { some: {} } };
+  const customerWhere = options?.customerId
+    ? { id: options.customerId }
+    : {
+        vehicles: { some: {} },
+        ...(options?.resume ? { recommendations: { none: {} } } : {}),
+      };
   const total = await prisma.customer.count({ where: customerWhere });
   await options?.onProgress?.(0, Math.max(total, 1));
 
   let done = 0;
   let created = 0;
   let cursor: string | undefined;
+  let pending: Array<{
+    customerId: string;
+    productId: string;
+    vehicleId: string;
+    customerVehicleId: string;
+    score: number;
+    scoreRaw: number;
+    matchLevel: "EXACT" | "SAME_SERIES" | "SAME_FAMILY" | "RELATED_APPLICATION" | "INSUFFICIENT_DATA";
+    confidence: number;
+    status: "GENERATED" | "NEEDS_REVIEW";
+  }> = [];
+
+  const flush = async () => {
+    if (!pending.length) return;
+    await prisma.recommendation.createMany({ data: pending, skipDuplicates: true });
+    created += pending.length;
+    pending = [];
+  };
 
   for (;;) {
     const customers = await prisma.customer.findMany({
       where: customerWhere,
-      take: 50,
+      take: 25,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       orderBy: { id: "asc" },
       include: {
@@ -84,14 +124,17 @@ export async function generateRecommendations(options?: {
       for (const customerVehicle of customer.vehicles) {
         const customerProfile = profileFromVehicle(customerVehicle.vehicle);
         const make = customerVehicle.vehicle.make.toLowerCase();
-        for (const product of products) {
-          if (purchasedProductIds.has(product.id)) continue;
-          const sameMake = product.make?.toLowerCase() === make;
+        const seen = new Set<string>();
+        const candidates = [
+          ...(productsByMake.get(make) ?? []),
+          ...(productsByVehicle.get(customerVehicle.vehicleId) ?? []),
+        ];
+        for (const product of candidates) {
+          if (seen.has(product.id) || purchasedProductIds.has(product.id)) continue;
+          seen.add(product.id);
           const explicitFitment = product.fitments.some(
             (f) => !f.isNegative && f.vehicleId === customerVehicle.vehicleId,
           );
-          if (!sameMake && !explicitFitment) continue;
-
           const negative = product.overrides.some((o) => !o.isCompatible) || product.fitments.some((f) => f.isNegative);
           const positiveOverride = product.overrides.some(
             (o) =>
@@ -100,21 +143,17 @@ export async function generateRecommendations(options?: {
               (!o.series.length || o.series.some((s) => customerVehicle.vehicle.series.includes(s))),
           );
 
-          const productProfile: FitmentProfile = {
-            make: product.make,
-            model: product.model,
-            vehicleFamily: product.vehicleFamily,
-            series: product.series,
-            bodyType: product.bodyType,
-            yearFrom: product.yearFrom,
-            yearTo: product.yearTo,
-            application: product.fitment,
-          };
-
           const scored = scoreRecommendation({
             customer: customerProfile,
             product: {
-              ...productProfile,
+              make: product.make,
+              model: product.model,
+              vehicleFamily: product.vehicleFamily,
+              series: product.series,
+              bodyType: product.bodyType,
+              yearFrom: product.yearFrom,
+              yearTo: product.yearTo,
+              application: product.fitment,
               sku: product.sku,
               category: product.category,
               fitment: product.fitment,
@@ -135,55 +174,28 @@ export async function generateRecommendations(options?: {
           if (scored.matchLevel === "INSUFFICIENT_DATA" && !scored.eligible) continue;
           if (scored.score <= 0 && !scored.eligible) continue;
 
-          const status = scored.eligible ? "GENERATED" : "NEEDS_REVIEW";
-          const rec = await prisma.recommendation.upsert({
-            where: {
-              customerId_productId_vehicleId: {
-                customerId: customer.id,
-                productId: product.id,
-                vehicleId: customerVehicle.vehicleId,
-              },
-            },
-            update: {
-              score: scored.score,
-              scoreRaw: scored.scoreRaw,
-              matchLevel: scored.matchLevel,
-              confidence: scored.confidence,
-              status,
-              customerVehicleId: customerVehicle.id,
-            },
-            create: {
-              customerId: customer.id,
-              productId: product.id,
-              vehicleId: customerVehicle.vehicleId,
-              customerVehicleId: customerVehicle.id,
-              score: scored.score,
-              scoreRaw: scored.scoreRaw,
-              matchLevel: scored.matchLevel,
-              confidence: scored.confidence,
-              status,
-            },
+          pending.push({
+            customerId: customer.id,
+            productId: product.id,
+            vehicleId: customerVehicle.vehicleId,
+            customerVehicleId: customerVehicle.id,
+            score: scored.score,
+            scoreRaw: scored.scoreRaw,
+            matchLevel: scored.matchLevel,
+            confidence: scored.confidence,
+            status: scored.eligible ? "GENERATED" : "NEEDS_REVIEW",
           });
-          await prisma.recommendationReason.deleteMany({ where: { recommendationId: rec.id } });
-          if (scored.reasons.length) {
-            await prisma.recommendationReason.createMany({
-              data: scored.reasons.map((reason) => ({
-                recommendationId: rec.id,
-                code: reason.code,
-                label: reason.label,
-                points: reason.points,
-              })),
-            });
-          }
-          created += 1;
+          if (pending.length >= 400) await flush();
         }
       }
       done += 1;
       if (options?.onProgress) await options.onProgress(done, Math.max(total, 1));
     }
+    await flush();
   }
 
-  if (!options?.skipSegments) await segmentCustomers();
+  await flush();
+  if (!options?.skipSegments && !options?.resume) await segmentCustomers();
   return { customers: total, recommendations: created };
 }
 
