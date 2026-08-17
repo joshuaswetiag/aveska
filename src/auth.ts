@@ -34,6 +34,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           .toLowerCase();
         const password = String(credentials?.password ?? "");
         if (!email || !password) return null;
+        const { ensureAdminUser } = await import("@/lib/ensure-admin");
+        if ((await prisma.user.count()) === 0) await ensureAdminUser();
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user) return null;
         const ok = await compare(password, user.passwordHash);
