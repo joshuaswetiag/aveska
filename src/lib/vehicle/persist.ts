@@ -285,15 +285,19 @@ export async function extractCatalogueFitments(onProgress?: (done: number, total
       },
       learned,
     );
+    const productModel = product.model;
+    const productFamily = product.vehicleFamily;
     const keepModel =
-      Boolean(product.model) && !looksLikeProductTitle(product.model) && product.model.trim().split(/\s+/).length <= 3;
+      typeof productModel === "string" &&
+      !looksLikeProductTitle(productModel) &&
+      productModel.trim().split(/\s+/).length <= 3;
     const keepFamily =
-      Boolean(product.vehicleFamily) &&
-      !looksLikeProductTitle(product.vehicleFamily) &&
-      product.vehicleFamily.trim().split(/\s+/).length <= 3;
+      typeof productFamily === "string" &&
+      !looksLikeProductTitle(productFamily) &&
+      productFamily.trim().split(/\s+/).length <= 3;
     const canonicalName = canonicalVehicleName(extraction);
     const usable =
-      Boolean(canonicalName) &&
+      typeof canonicalName === "string" &&
       !looksLikeProductTitle(canonicalName) &&
       Boolean(extraction.make || extraction.series.length);
 
