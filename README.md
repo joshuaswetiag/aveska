@@ -1,36 +1,164 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Aveska Intelligence
 
-## Getting Started
+Internal vehicle-based customer cross-sell and marketing intelligence platform for Aveska.
 
-First, run the development server:
+This is not a generic recommendation engine. Compatibility is established from vehicle/application data extracted from orders and the product catalogue. Products are never recommended only because they share a category.
+
+V1 generates, previews, approves, and can bulk-send campaigns over SMTP or Maropost. Export CSV/XLSX still works.
+
+## Installation
+
+```bash
+npm install
+```
+
+## Environment setup
+
+Copy `.env.example` to `.env` and set values:
+
+```bash
+copy .env.example .env
+```
+
+Required:
+
+- `DATABASE_URL` — PostgreSQL connection string
+- `AUTH_SECRET` — long random string for Auth.js
+
+Optional:
+
+- `AI_PROVIDER` / `AI_API_KEY` — leave as `none` to use the built-in template writer
+- `EMAIL_PROVIDER` — `export` (no send), `smtp`, or `maropost`
+- `SMTP_FROM` / `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` — required for SMTP send
+- `MAROPOST_ACCOUNT_ID` / `MAROPOST_API_KEY` — required when `EMAIL_PROVIDER=maropost`
+
+## Database setup
+
+PostgreSQL is required. This machine does not have Docker, so use the local Scoop install:
+
+```bash
+pg_ctl start
+createdb -U postgres aveska
+npx prisma migrate deploy
+npm run db:seed
+```
+
+If Postgres is already running, skip `pg_ctl start`. Stop it later with `pg_ctl stop`.
+
+Docker alternative (if you install Docker Desktop later):
+
+```bash
+docker compose up -d
+```
+
+Then set `DATABASE_URL` to `postgresql://aveska:aveska@localhost:5432/aveska?schema=public`.
+
+Default admin login after seed:
+
+- Email: `admin@aveska.local`
+- Password: `change-me`
+
+## Development
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Optional background worker (imports also process in-request):
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run worker
+```
 
-## Learn More
+## Production build
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run build
+npm start
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Deploy on Railway
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The app stays online 24/7 (no `track:tunnel` on your PC). You need a **GitHub repo** or the Railway CLI.
 
-## Deploy on Vercel
+1. In [Railway](https://railway.app), **New Project → Database → PostgreSQL**.
+2. **New → GitHub Repo** (or `railway up`) and deploy this app into the same project.
+3. On the app service **Variables**, add:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```text
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+AUTH_SECRET=<long random string>
+AUTH_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
+TRACKING_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
+ADMIN_EMAIL=admin@aveska.local
+ADMIN_PASSWORD=<strong password, not change-me>
+NETO_API_URL=https://www.aveska.com.au/do/WS/NetoAPI
+NETO_API_KEY=<from local .env>
+NETO_API_USERNAME=<from local .env>
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Rename `Postgres` in `DATABASE_URL` if your database service has a different name.
+
+4. **Settings → Networking → Generate Domain**. Redeploy once `AUTH_URL` can resolve.
+5. Migrations run automatically (`npx prisma migrate deploy` before each start). Seed once from Railway **Settings → one-off command**:
+
+```bash
+npx tsx prisma/seed.ts
+```
+
+6. Sign in, set **Settings → Public app URL** to the same https URL, save SMTP, then send campaigns. Click tracking works while Railway is running, with your PC off.
+
+Do not commit `.env`. SMTP can stay in the app Settings after the first login.
+
+## Importing orders
+
+1. Go to **Imports**
+2. Choose **Orders**
+3. Upload 3 months of CSV/XLSX
+4. Confirm column mapping
+5. Review the import summary (valid rows, duplicates, missing email/product)
+
+Sample file: `fixtures/sample-orders.csv`
+
+## Importing catalogue
+
+1. Go to **Imports**
+2. Choose **Catalogue**
+3. Upload CSV/XLSX/JSON
+4. Map make/model/series/fitment fields when present
+5. The catalogue becomes the source of truth for recommendations
+
+Sample file: `fixtures/sample-catalogue.csv`
+
+## Generating recommendations
+
+Click **Analyse customers** on the dashboard. This:
+
+1. Extracts vehicle/application data
+2. Builds customer vehicle profiles
+3. Matches catalogue products by fitment
+4. Excludes purchased SKUs, out-of-stock items, and incompatible vehicles
+5. Writes human-readable reasons and confidence scores
+
+## Generating campaigns
+
+1. Review recommendations
+2. Open **Campaigns** or a customer/vehicle page
+3. Click **Generate campaign**
+4. Preview desktop/mobile email
+5. Approve
+6. Send a test, then **Send emails**, or export CSV/XLSX
+
+Bulk send stays off until `EMAIL_PROVIDER` is `smtp` or `maropost` in `.env`.
+
+## Tests
+
+```bash
+npm test
+```
+
+## Demo mode
+
+Sign in and click **Run demo**. It loads the Ford XB/XC fixture, generates recommendations, and creates a reviewable campaign. The Toyota LandCruiser product must not be recommended to the Ford customer.

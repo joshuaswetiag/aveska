@@ -1,0 +1,665 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MARKETING
+  READONLY
+}
+
+enum ImportType {
+  ORDERS
+  CATALOGUE
+  SUPPRESSION
+  VEHICLE_ALIASES
+}
+
+enum ImportStatus {
+  PENDING
+  VALIDATING
+  MAPPING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum JobType {
+  IMPORT
+  EXTRACT_VEHICLES
+  GENERATE_RECOMMENDATIONS
+  GENERATE_CAMPAIGN
+  SEGMENT_CUSTOMERS
+  ANALYSE_CUSTOMERS
+  DEMO
+  NETO_SYNC
+  SEND_CAMPAIGN
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum StockStatus {
+  IN_STOCK
+  OUT_OF_STOCK
+  UNKNOWN
+  DISCONTINUED
+}
+
+enum RecommendationStatus {
+  GENERATED
+  NEEDS_REVIEW
+  APPROVED
+  REJECTED
+  INCORRECT_FITMENT
+  NOT_RELEVANT
+  ALREADY_PURCHASED
+  EXCELLENT_MATCH
+}
+
+enum CampaignType {
+  CROSS_SELL
+  VEHICLE_RESTORATION
+  RELATED_PRODUCTS
+  RE_ENGAGEMENT
+  NEW_PRODUCT
+  CATEGORY_PROMOTION
+  SEASONAL
+  CLEARANCE
+  BACK_IN_STOCK
+  NEWSLETTER
+}
+
+enum CampaignStatus {
+  DRAFT
+  GENERATED
+  IN_REVIEW
+  APPROVED
+  EXPORTED
+  SENDING
+  SENT
+  ARCHIVED
+}
+
+enum SuppressionReason {
+  UNSUBSCRIBED
+  BOUNCED
+  INVALID
+  DO_NOT_CONTACT
+}
+
+enum MatchLevel {
+  EXACT
+  SAME_SERIES
+  SAME_FAMILY
+  RELATED_APPLICATION
+  INSUFFICIENT_DATA
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  name         String
+  passwordHash String
+  role         Role       @default(READONLY)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  auditLogs    AuditLog[]
+}
+
+model Customer {
+  id                 String               @id @default(cuid())
+  externalId         String?
+  name               String
+  email              String?
+  emailNormalized    String?
+  phone              String?
+  firstName          String?
+  lastName           String?
+  totalOrders        Int                  @default(0)
+  totalSpend         Decimal              @default(0) @db.Decimal(12, 2)
+  averageOrderValue  Decimal              @default(0) @db.Decimal(12, 2)
+  firstPurchaseAt    DateTime?
+  lastPurchaseAt     DateTime?
+  productCount       Int                  @default(0)
+  vehicleCount       Int                  @default(0)
+  mainVehicleId      String?
+  mainCategory       String?
+  isSuppressed       Boolean              @default(false)
+  originalData       Json?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  orders             Order[]
+  vehicles           CustomerVehicle[]
+  recommendations    Recommendation[]
+  campaignRecipients CampaignRecipient[]
+  segments           CustomerSegment[]
+  traffic            CampaignTraffic[]
+
+  @@index([emailNormalized])
+  @@index([email])
+  @@index([externalId])
+  @@index([lastPurchaseAt])
+  @@index([name])
+}
+
+model Order {
+  id            String      @id @default(cuid())
+  externalId    String?
+  customerId    String
+  customer      Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  orderDate     DateTime?
+  orderTotal    Decimal?    @db.Decimal(12, 2)
+  sourceRowHash String?
+  importJobId   String?
+  originalData  Json?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  items         OrderItem[]
+
+  @@index([customerId])
+  @@index([orderDate])
+  @@index([externalId])
+  @@index([sourceRowHash])
+  @@index([importJobId])
+}
+
+model OrderItem {
+  id                    String   @id @default(cuid())
+  orderId               String
+  order                 Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId             String?
+  product               Product? @relation(fields: [productId], references: [id])
+  sku                   String?
+  productName           String
+  productNameRaw        String
+  quantity              Int      @default(1)
+  unitPrice             Decimal? @db.Decimal(12, 2)
+  lineTotal             Decimal? @db.Decimal(12, 2)
+  productUrl            String?
+  category              String?
+  extractedVehicle      Json?
+  extractionConfidence  Decimal? @db.Decimal(5, 4)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([sku])
+}
+
+model Product {
+  id             String            @id @default(cuid())
+  sku            String?
+  skuNormalized  String?
+  externalId     String?
+  name           String
+  nameRaw        String
+  description    String?
+  descriptionRaw String?
+  url            String?
+  imageUrl       String?
+  category       String?
+  subcategory    String?
+  brand          String?
+  price          Decimal?          @db.Decimal(12, 2)
+  stock          Int?
+  stockStatus    StockStatus       @default(UNKNOWN)
+  make           String?
+  model          String?
+  vehicleFamily  String?
+  series         String[]          @default([])
+  bodyType       String?
+  yearFrom       Int?
+  yearTo         Int?
+  engine         String?
+  fitment        String?
+  aliases        String[]          @default([])
+  searchableText String?           @db.Text
+  tags           String[]          @default([])
+  discontinued   Boolean           @default(false)
+  originalData   Json?
+  importJobId    String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  fitments       ProductFitment[]
+  orderItems     OrderItem[]
+  recommendations Recommendation[]
+  campaignProducts CampaignProduct[]
+  overrides      FitmentOverride[]
+
+  @@index([sku])
+  @@index([skuNormalized])
+  @@index([externalId])
+  @@index([make])
+  @@index([model])
+  @@index([vehicleFamily])
+  @@index([stockStatus])
+  @@index([category])
+  @@index([discontinued])
+}
+
+model Vehicle {
+  id               String             @id @default(cuid())
+  make             String
+  model            String?
+  vehicleFamily    String?
+  series           String[]           @default([])
+  generation       String?
+  bodyType         String?
+  yearFrom         Int?
+  yearTo           Int?
+  engine           String?
+  engineCode       String?
+  variant          String?
+  driveType        String?
+  application      String?
+  canonicalName    String             @unique
+  searchableText   String             @db.Text
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  aliases          VehicleAlias[]
+  fitments         ProductFitment[]
+  customerVehicles CustomerVehicle[]
+  recommendations  Recommendation[]
+
+  @@index([make])
+  @@index([model])
+  @@index([vehicleFamily])
+  @@index([canonicalName])
+}
+
+model VehicleAlias {
+  id              String   @id @default(cuid())
+  vehicleId       String
+  vehicle         Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  alias           String
+  aliasNormalized String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([aliasNormalized])
+  @@index([aliasNormalized])
+  @@index([vehicleId])
+}
+
+model ProductFitment {
+  id         String     @id @default(cuid())
+  productId  String
+  product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  vehicleId  String
+  vehicle    Vehicle    @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  source     String
+  confidence Decimal    @db.Decimal(5, 4)
+  matchLevel MatchLevel
+  notes      String?
+  isNegative Boolean    @default(false)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  @@unique([productId, vehicleId, isNegative])
+  @@index([productId])
+  @@index([vehicleId])
+}
+
+model FitmentOverride {
+  id            String   @id @default(cuid())
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  make          String?
+  model         String?
+  series        String[] @default([])
+  vehicleFamily String?
+  bodyType      String?
+  isCompatible  Boolean
+  notes         String?
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([productId])
+}
+
+model CustomerVehicle {
+  id              String           @id @default(cuid())
+  customerId      String
+  customer        Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  vehicleId       String
+  vehicle         Vehicle          @relation(fields: [vehicleId], references: [id])
+  confidence      Decimal          @db.Decimal(5, 4)
+  source          String
+  isPrimary       Boolean          @default(false)
+  mergedFromIds   String[]         @default([])
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  recommendations Recommendation[]
+
+  @@unique([customerId, vehicleId])
+  @@index([customerId])
+  @@index([vehicleId])
+}
+
+model Recommendation {
+  id                 String                 @id @default(cuid())
+  customerId         String
+  customer           Customer               @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  vehicleId          String
+  vehicle            Vehicle                @relation(fields: [vehicleId], references: [id])
+  customerVehicleId  String?
+  customerVehicle    CustomerVehicle?       @relation(fields: [customerVehicleId], references: [id])
+  productId          String
+  product            Product                @relation(fields: [productId], references: [id])
+  purchasedProductId String?
+  score              Decimal                @db.Decimal(5, 2)
+  scoreRaw           Decimal                @db.Decimal(8, 2)
+  matchLevel         MatchLevel
+  confidence         Decimal                @db.Decimal(5, 4)
+  status             RecommendationStatus    @default(GENERATED)
+  feedbackNote       String?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  reasons            RecommendationReason[]
+  campaignProducts   CampaignProduct[]
+
+  @@unique([customerId, productId, vehicleId])
+  @@index([customerId])
+  @@index([vehicleId])
+  @@index([productId])
+  @@index([status])
+  @@index([score])
+}
+
+model RecommendationReason {
+  id               String         @id @default(cuid())
+  recommendationId String
+  recommendation   Recommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  code             String
+  label            String
+  points           Int
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([recommendationId])
+}
+
+model Segment {
+  id          String            @id @default(cuid())
+  slug        String            @unique
+  name        String
+  type        String
+  description String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  customers   CustomerSegment[]
+}
+
+model CustomerSegment {
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  segmentId  String
+  segment    Segment  @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@id([customerId, segmentId])
+  @@index([segmentId])
+}
+
+model Campaign {
+  id              String              @id @default(cuid())
+  name            String
+  slug            String              @unique
+  type            CampaignType        @default(CROSS_SELL)
+  status          CampaignStatus      @default(DRAFT)
+  targetSegmentId String?
+  vehicleFilter   String?
+  subject         String?
+  preheader       String?
+  bodyHtml        String?             @db.Text
+  bodyText        String?             @db.Text
+  ctaLabel        String?
+  ctaUrl          String?
+  fromName        String?
+  replyTo         String?
+  trackingEnabled Boolean             @default(true)
+  utmSource       String              @default("email")
+  utmMedium       String              @default("email")
+  approvedAt      DateTime?
+  approvedById    String?
+  exportedAt      DateTime?
+  sentAt          DateTime?
+  sent            Int                 @default(0)
+  delivered       Int                 @default(0)
+  opened          Int                 @default(0)
+  clicked         Int                 @default(0)
+  bounced         Int                 @default(0)
+  unsubscribed    Int                 @default(0)
+  converted       Int                 @default(0)
+  revenue         Decimal             @default(0) @db.Decimal(12, 2)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  recipients      CampaignRecipient[]
+  products        CampaignProduct[]
+  traffic         CampaignTraffic[]
+
+  @@index([status])
+  @@index([type])
+  @@index([slug])
+}
+
+model CampaignRecipient {
+  id               String    @id @default(cuid())
+  campaignId       String
+  campaign         Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  customerId       String
+  customer         Customer  @relation(fields: [customerId], references: [id])
+  vehicleLabel     String?
+  purchasedProduct String?
+  subject          String?
+  preheader        String?
+  bodyHtml         String?   @db.Text
+  personalized     Json?
+  sent             Boolean   @default(false)
+  sentAt           DateTime?
+  sendError        String?
+  providerMessageId String?
+  delivered        Boolean   @default(false)
+  opened           Boolean   @default(false)
+  openedAt         DateTime?
+  clicked          Boolean   @default(false)
+  clickedAt        DateTime?
+  bounced          Boolean   @default(false)
+  unsubscribed     Boolean   @default(false)
+  converted        Boolean   @default(false)
+  revenue          Decimal   @default(0) @db.Decimal(12, 2)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  traffic          CampaignTraffic[]
+
+  @@unique([campaignId, customerId])
+  @@index([campaignId])
+  @@index([customerId])
+}
+
+model CampaignTraffic {
+  id          String             @id @default(cuid())
+  campaignId  String
+  campaign    Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  recipientId String
+  recipient   CampaignRecipient  @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  type        String
+  url         String?
+  label       String?
+  createdAt   DateTime           @default(now())
+
+  @@index([campaignId, createdAt])
+  @@index([customerId])
+  @@index([createdAt])
+}
+
+model CampaignProduct {
+  id               String          @id @default(cuid())
+  campaignId       String
+  campaign         Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product         @relation(fields: [productId], references: [id])
+  recommendationId String?
+  recommendation   Recommendation? @relation(fields: [recommendationId], references: [id])
+  sortOrder        Int             @default(0)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([campaignId])
+}
+
+model EmailTemplate {
+  id        String       @id @default(cuid())
+  name      String
+  slug      String       @unique
+  type      CampaignType
+  subject   String
+  preheader String?
+  bodyHtml  String       @db.Text
+  ctaLabel  String?
+  ctaUrl    String?
+  isDefault Boolean      @default(false)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model Suppression {
+  id              String            @id @default(cuid())
+  email           String
+  emailNormalized String
+  reason          SuppressionReason
+  source          String?
+  notes           String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([emailNormalized, reason])
+  @@index([emailNormalized])
+}
+
+model ImportJob {
+  id              String           @id @default(cuid())
+  type            ImportType
+  status          ImportStatus     @default(PENDING)
+  fileName        String
+  filePath        String?
+  fileSize        Int?
+  mimeType        String?
+  columnMapping   Json?
+  detectedColumns Json?
+  totalRows       Int              @default(0)
+  processedRows   Int              @default(0)
+  validRows       Int              @default(0)
+  duplicateRows   Int              @default(0)
+  errorRows       Int              @default(0)
+  missingEmail    Int              @default(0)
+  missingProduct  Int              @default(0)
+  summary         Json?
+  errorMessage    String?
+  createdById     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  errors          ImportRowError[]
+  job             Job?
+
+  @@index([type])
+  @@index([status])
+}
+
+model ImportRowError {
+  id          String    @id @default(cuid())
+  importJobId String
+  importJob   ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+  rowNumber   Int
+  field       String?
+  message     String
+  rawData     Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([importJobId])
+}
+
+model Job {
+  id           String    @id @default(cuid())
+  type         JobType
+  status       JobStatus @default(QUEUED)
+  progress     Int       @default(0)
+  total        Int       @default(0)
+  message      String?
+  payload      Json?
+  result       Json?
+  errorMessage String?
+  importJobId  String?   @unique
+  importJob    ImportJob? @relation(fields: [importJobId], references: [id])
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status])
+  @@index([type])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Settings {
+  id                      String   @id @default("default")
+  cooldownDays            Int      @default(90)
+  confidenceThreshold     Decimal  @default(0.85) @db.Decimal(5, 4)
+  includeOutOfStock       Boolean  @default(false)
+  utmEnabled              Boolean  @default(true)
+  shopUrl                 String?
+  contactUrl              String?
+  fromName                String   @default("Aveska")
+  fromEmail               String?
+  replyTo                 String?
+  emailProvider           String?
+  smtpHost                String?
+  smtpPort                Int?
+  smtpSecure              Boolean  @default(false)
+  smtpUser                String?
+  smtpPassword            String?
+  emailSendDelayMs        Int      @default(200)
+  maropostAccountId       String?
+  maropostApiKey          String?
+  maropostCampaignName    String?
+  companyName             String   @default("Aveska")
+  logoUrl                 String?
+  trackingUrl             String?
+  aiProvider              String?
+  aiModel                 String?
+  reduceScoreSameFamily   Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+}

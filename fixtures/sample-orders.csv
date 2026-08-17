@@ -1,0 +1,4 @@
+Customer ID,Customer Name,Email,Order ID,Order Date,SKU,Product Name,Quantity,Unit Price,Order Total
+C-1001,John Smith,john@example.com,ORD-1001,2026-05-12,AV-XB-SB-001,Front Bucket Seat Belts to suit Ford XB XC Sedan - Pair,1,189,189
+C-1002,Mary Nguyen,mary@example.com,ORD-1002,2026-06-20,AV-HQ-RR-006,Holden HQ HJ HX HZ Right Front Guard Lower Rust Repair Panel,1,198,198
+C-1003,Sam Wright,sam@example.com,ORD-1003,2026-07-02,AV-LC75-005,Toyota LandCruiser 75 Series Panel,1,420,420
