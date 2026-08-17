@@ -78,7 +78,7 @@ export async function GET() {
     const active = fullJobs.find((row) => row.status === "QUEUED" || row.status === "RUNNING") ?? null;
     const completed = fullJobs.find((row) => row.status === "COMPLETED") ?? null;
     const failed = !active ? fullJobs.find((row) => row.status === "FAILED") ?? null : null;
-    const ready = !active && Boolean(completed) && stats.products > 0 && stats.orders > 0;
+    const ready = stats.products > 0 && stats.orders > 0 && stats.recommendations > 0;
     return json({
       ready,
       netoConfigured,
