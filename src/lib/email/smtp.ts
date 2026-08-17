@@ -1,4 +1,4 @@
-import { lookup as dnsLookup } from "node:dns";
+import { promises as dnsPromises, setDefaultResultOrder } from "node:dns";
 import nodemailer from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import type { EmailProvider } from "@/lib/email/provider";
@@ -43,20 +43,25 @@ export function explainSmtpError(host: string | null, port: number, error: unkno
   return `Could not send via ${target}: ${detail}`;
 }
 
-function smtpOptions(stored: StoredMailSettings | null): SMTPTransport.Options {
+setDefaultResultOrder("ipv4first");
+
+async function smtpOptions(stored: StoredMailSettings | null): Promise<SMTPTransport.Options> {
   const config = getMailConfig(stored);
   if (!config.configured || !config.host) {
     throw new Error("Email sending is not configured. Add SMTP details under Settings.");
   }
+  let host = config.host;
+  try {
+    const resolved = await dnsPromises.lookup(config.host, { family: 4, all: false });
+    host = resolved.address;
+  } catch {
+    // Keep the hostname if IPv4 lookup fails; connection error handling still applies.
+  }
   return {
-    host: config.host,
+    host,
     port: config.port,
     secure: config.secure,
     requireTLS: !config.secure && (config.port === 587 || config.port === 2525),
-    family: 4,
-    lookup(hostname, _options, callback) {
-      dnsLookup(hostname, { family: 4, all: false }, callback);
-    },
     auth: config.user ? { user: config.user, pass: getMailPassword(stored) } : undefined,
     connectionTimeout: 15_000,
     greetingTimeout: 15_000,
@@ -97,7 +102,7 @@ export class SmtpEmailProvider implements EmailProvider {
     const config = getMailConfig(stored);
     const outbound = htmlWithInlineLogo(payload.html);
     try {
-      const info = await nodemailer.createTransport(smtpOptions(stored)).sendMail({
+      const info = await nodemailer.createTransport(await smtpOptions(stored)).sendMail({
         from: payload.from || formatFromHeader(config),
         to: payload.to,
         subject: payload.subject,
@@ -168,7 +173,7 @@ export async function verifyMailTransport(stored?: StoredMailSettings | null) {
     throw new Error(`Missing: ${missing.join(", ")}.`);
   }
   try {
-    await nodemailer.createTransport(smtpOptions(settings)).verify();
+    await nodemailer.createTransport(await smtpOptions(settings)).verify();
   } catch (error) {
     throw new Error(explainSmtpError(config.host, config.port, error));
   }
