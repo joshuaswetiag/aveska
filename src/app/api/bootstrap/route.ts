@@ -78,10 +78,7 @@ export async function GET() {
     const active = fullJobs.find((row) => row.status === "QUEUED" || row.status === "RUNNING") ?? null;
     const completed = fullJobs.find((row) => row.status === "COMPLETED") ?? null;
     const failed = !active ? fullJobs.find((row) => row.status === "FAILED") ?? null : null;
-    const pendingRecCustomers = await prisma.customer.count({
-      where: { vehicles: { some: {} }, recommendations: { none: {} } },
-    });
-    const ready = stats.products > 0 && stats.orders > 0 && pendingRecCustomers < 50;
+    const ready = stats.products > 0 && stats.orders > 0 && !active;
     return json({
       ready,
       netoConfigured,

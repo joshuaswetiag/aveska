@@ -3,8 +3,7 @@ import { prisma } from "@/lib/db";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { syncNetoCatalogue } from "@/lib/catalogue/neto";
 import { syncNetoOrders } from "@/lib/catalogue/neto-orders";
-import { extractCatalogueFitments, backfillCustomerVehiclesFromOrders } from "@/lib/vehicle/persist";
-import { generateRecommendations } from "@/lib/recommendation/generate";
+import { extractCatalogueFitments } from "@/lib/vehicle/persist";
 
 export const FULL_SYNC_FROM = "2016-01-01";
 
@@ -30,13 +29,7 @@ export async function syncFullAveskaStore(
 ) {
   const to = storeIsoDate();
   const from = FULL_SYNC_FROM;
-  const [productCount, orderCount, recCount, fitmentCount, customerVehicleCount] = await Promise.all([
-    prisma.product.count(),
-    prisma.order.count(),
-    prisma.recommendation.count(),
-    prisma.productFitment.count(),
-    prisma.customerVehicle.count(),
-  ]);
+  const [productCount, orderCount] = await Promise.all([prisma.product.count(), prisma.order.count()]);
 
   let catalogue: unknown = { skipped: true, imported: productCount };
   if (options?.refreshNeto || productCount < 1000) {
@@ -54,45 +47,13 @@ export async function syncFullAveskaStore(
     await onProgress?.(76, 100, `Using ${orderCount.toLocaleString()} orders already synced`);
   }
 
-  if (options?.refreshNeto || fitmentCount < 500) {
-    await onProgress?.(77, 100, "Matching vehicles from the catalogue…");
-    await extractCatalogueFitments(async (done, total) => {
-      await onProgress?.(77 + Math.round((done / Math.max(total, 1)) * 6), 100, "Matching vehicles from the catalogue…");
-    });
-  } else {
-    await onProgress?.(83, 100, "Vehicle catalogue already matched");
-  }
-
-  if (options?.refreshNeto || customerVehicleCount < 500) {
-    await onProgress?.(84, 100, "Matching vehicles from orders…");
-    await backfillCustomerVehiclesFromOrders(async (done, total, message) => {
-      await onProgress?.(84 + Math.round((done / Math.max(total, 1)) * 6), 100, message);
-    });
-  } else {
-    await onProgress?.(90, 100, "Customer vehicles already linked");
-  }
-
-  let recommendations: unknown = { skipped: true, recommendations: recCount };
-  const pendingRecCustomers = await prisma.customer.count({
-    where: { vehicles: { some: {} }, recommendations: { none: {} } },
+  await onProgress?.(77, 100, "Matching vehicles from every product…");
+  await extractCatalogueFitments(async (done, total) => {
+    await onProgress?.(77 + Math.round((done / Math.max(total, 1)) * 22), 100, "Matching vehicles from every product…");
   });
-  if (options?.refreshNeto || pendingRecCustomers > 0) {
-    await onProgress?.(91, 100, "Building customer recommendations…");
-    recommendations = await generateRecommendations({
-      skipSegments: true,
-      resume: true,
-      onProgress: async (done, total) => {
-        await onProgress?.(
-          91 + Math.round((done / Math.max(total, 1)) * 8),
-          100,
-          `Building recommendations ${done.toLocaleString()} / ${Math.max(total, 1).toLocaleString()}`,
-        );
-      },
-    });
-  }
 
   await onProgress?.(100, 100, "Aveska store loaded");
-  return { catalogue, orders, recommendations, from, to };
+  return { catalogue, orders, from, to };
 }
 
 export async function listFullSyncJobs() {
@@ -120,14 +81,13 @@ export async function ensureFullSyncQueued(createdById?: string, force = false) 
   const fullJobs = await listFullSyncJobs();
   const active = fullJobs.find((job) => job.status === "QUEUED" || job.status === "RUNNING");
   if (active) return active;
-  const [products, orders, pendingRecCustomers] = await Promise.all([
+  const [products, orders, vehicles] = await Promise.all([
     prisma.product.count(),
     prisma.order.count(),
-    prisma.customer.count({ where: { vehicles: { some: {} }, recommendations: { none: {} } } }),
+    prisma.vehicle.count(),
   ]);
   const completed = fullJobs.find((job) => job.status === "COMPLETED");
-  if (!force && completed && products > 0 && orders > 0 && pendingRecCustomers < 50) return completed;
-  if (!force && products > 0 && orders > 0 && pendingRecCustomers < 50) return completed ?? null;
+  if (!force && completed && products > 0 && orders > 0 && vehicles >= 4300) return completed;
   return enqueueJob({
     type: "NETO_SYNC",
     payload: { kind: "full", from: FULL_SYNC_FROM, to: storeIsoDate() },

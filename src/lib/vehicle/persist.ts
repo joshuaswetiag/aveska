@@ -230,9 +230,47 @@ export async function backfillCustomerVehiclesFromOrders(
 export async function extractCatalogueFitments(onProgress?: (done: number, total: number) => Promise<void>) {
   const learned = await loadLearnedKnowledge();
   const products = await prisma.product.findMany();
-  let done = 0;
-  await onProgress?.(0, Math.max(products.length, 1));
-  for (const product of products) {
+  const total = Math.max(products.length, 1);
+  await onProgress?.(0, total);
+
+  const vehiclesByName = new Map<
+    string,
+    {
+      make: string;
+      model: string | null;
+      vehicleFamily: string | null;
+      series: string[];
+      bodyType: string | null;
+      yearFrom: number | null;
+      yearTo: number | null;
+      engine: string | null;
+      engineCode: string | null;
+      variant: string | null;
+      driveType: string | null;
+      application: string | null;
+      canonicalName: string;
+      searchableText: string;
+    }
+  >();
+  const productRows: Array<{
+    id: string;
+    data: {
+      make: string | null;
+      model: string | null;
+      vehicleFamily: string | null;
+      series: string[];
+      bodyType: string | null;
+      yearFrom: number | null;
+      yearTo: number | null;
+      searchableText: string;
+    };
+    canonicalName: string | null;
+    confidence: number;
+    matchLevel: "EXACT" | "SAME_FAMILY";
+  }> = [];
+
+  for (let index = 0; index < products.length; index += 1) {
+    const product = products[index];
     const extraction = extractVehicle(
       {
         name: product.name,
@@ -242,85 +280,108 @@ export async function extractCatalogueFitments(onProgress?: (done: number, total
         fitment: product.fitment,
         make: product.make,
         model: product.model,
-        series: [],
+        series: product.series.length ? product.series : [],
         bodyType: product.bodyType,
       },
       learned,
     );
-
-    const keepModel = product.model && !looksLikeProductTitle(product.model) && product.model.trim().split(/\s+/).length <= 3;
+    const keepModel =
+      Boolean(product.model) && !looksLikeProductTitle(product.model) && product.model.trim().split(/\s+/).length <= 3;
     const keepFamily =
-      product.vehicleFamily &&
+      Boolean(product.vehicleFamily) &&
       !looksLikeProductTitle(product.vehicleFamily) &&
       product.vehicleFamily.trim().split(/\s+/).length <= 3;
+    const canonicalName = canonicalVehicleName(extraction);
+    const usable =
+      Boolean(canonicalName) &&
+      !looksLikeProductTitle(canonicalName) &&
+      Boolean(extraction.make || extraction.series.length);
 
-    await prisma.product.update({
-      where: { id: product.id },
+    if (usable && canonicalName && !vehiclesByName.has(canonicalName)) {
+      vehiclesByName.set(canonicalName, {
+        make: extraction.make ?? "Unknown",
+        model: extraction.model,
+        vehicleFamily: extraction.vehicleFamily,
+        series: extraction.series,
+        bodyType: extraction.bodyType,
+        yearFrom: extraction.yearFrom,
+        yearTo: extraction.yearTo,
+        engine: extraction.engine,
+        engineCode: extraction.engineCode,
+        variant: extraction.variant,
+        driveType: extraction.driveType,
+        application: extraction.application,
+        canonicalName,
+        searchableText: vehicleSearchText({ ...extraction, aliases: extraction.vehicleAliases }),
+      });
+    }
+
+    productRows.push({
+      id: product.id,
       data: {
         make: product.make ?? extraction.make,
         model: keepModel ? product.model : extraction.model,
         vehicleFamily: keepFamily ? product.vehicleFamily : extraction.vehicleFamily,
-        series: extraction.series,
+        series: extraction.series.length ? extraction.series : product.series,
         bodyType: product.bodyType ?? extraction.bodyType,
         yearFrom: product.yearFrom ?? extraction.yearFrom,
         yearTo: product.yearTo ?? extraction.yearTo,
-        searchableText: [
-          product.searchableText,
-          extraction.application,
-          extraction.vehicleAliases.join(" "),
-        ]
+        searchableText: [product.searchableText, extraction.application, extraction.vehicleAliases.join(" ")]
           .filter(Boolean)
           .join(" ")
           .toLowerCase(),
       },
+      canonicalName: usable ? canonicalName : null,
+      confidence: extraction.confidence,
+      matchLevel: extraction.series.length ? "EXACT" : "SAME_FAMILY",
     });
 
-    const vehicle = await upsertVehicleFromExtraction(extraction);
-    if (vehicle && extraction.confidence >= 0.5) {
-      const overrides = await prisma.fitmentOverride.findMany({ where: { productId: product.id } });
-      const negative = overrides.some(
-        (o) =>
-          !o.isCompatible &&
-          (!o.make || o.make.toLowerCase() === vehicle.make.toLowerCase()) &&
-          (!o.series.length || o.series.some((s) => vehicle.series.includes(s))),
-      );
-      await prisma.productFitment.upsert({
-        where: {
-          productId_vehicleId_isNegative: {
-            productId: product.id,
-            vehicleId: vehicle.id,
-            isNegative: negative,
-          },
-        },
-        update: { confidence: extraction.confidence, source: "extraction" },
-        create: {
-          productId: product.id,
-          vehicleId: vehicle.id,
-          source: "extraction",
-          confidence: extraction.confidence,
-          matchLevel: extraction.series.length ? "EXACT" : "SAME_FAMILY",
-          isNegative: negative,
-        },
-      });
-    }
+    if (onProgress && index % 200 === 0) await onProgress(index, total);
+  }
 
-    const autoFitments = await prisma.productFitment.findMany({
-      where: { productId: product.id, source: { in: ["extraction", "neto"] } },
-      include: { vehicle: true },
+  const vehicleList = [...vehiclesByName.values()];
+  for (let index = 0; index < vehicleList.length; index += 200) {
+    await prisma.vehicle.createMany({
+      data: vehicleList.slice(index, index + 200),
+      skipDuplicates: true,
     });
-    const staleIds = autoFitments
-      .filter((fitment) => fitment.vehicleId !== vehicle?.id)
-      .map((fitment) => fitment.id);
-    if (staleIds.length) {
-      await prisma.productFitment.deleteMany({ where: { id: { in: staleIds } } });
-    }
+  }
 
-    done += 1;
-    if (onProgress && done % 25 === 0) await onProgress(done, products.length);
+  const savedVehicles = await prisma.vehicle.findMany({
+    where: { canonicalName: { in: [...vehiclesByName.keys()] } },
+    select: { id: true, canonicalName: true },
+  });
+  const vehicleIdByName = new Map(savedVehicles.map((row) => [row.canonicalName, row.id]));
+
+  for (let index = 0; index < productRows.length; index += 50) {
+    const chunk = productRows.slice(index, index + 50);
+    await prisma.$transaction(chunk.map((row) => prisma.product.update({ where: { id: row.id }, data: row.data })));
+    if (onProgress) await onProgress(Math.min(index + chunk.length, total), total);
+  }
+
+  const fitments = productRows.flatMap((row) => {
+    if (!row.canonicalName || row.confidence < 0.5) return [];
+    const vehicleId = vehicleIdByName.get(row.canonicalName);
+    if (!vehicleId) return [];
+    return [
+      {
+        productId: row.id,
+        vehicleId,
+        source: "extraction",
+        confidence: row.confidence,
+        matchLevel: row.matchLevel,
+        isNegative: false,
+      },
+    ];
+  });
+  for (let index = 0; index < fitments.length; index += 200) {
+    await prisma.productFitment.createMany({
+      data: fitments.slice(index, index + 200),
+      skipDuplicates: true,
+    });
   }
 
   await pruneProductTitleVehicles();
-  await pruneOrphanVehicles();
 }
 
 export async function extractOrderVehicles(onProgress?: (done: number, total: number, message?: string) => Promise<void>) {
