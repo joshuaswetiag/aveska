@@ -24,6 +24,7 @@ export async function enqueueJob(input: {
       createdById: input.createdById,
       total: input.total ?? 0,
       status: "QUEUED",
+      message: "Waiting for worker…",
     },
   });
 }
@@ -41,13 +42,21 @@ export async function processNextJob(jobId?: string) {
   const inflight = (globalThis as { aveskaJobsInFlight?: Set<string> }).aveskaJobsInFlight ?? new Set<string>();
   (globalThis as { aveskaJobsInFlight?: Set<string> }).aveskaJobsInFlight = inflight;
   if (inflight.has(job.id)) return job.id;
+  if (job.status === "RUNNING") {
+    const ageMs = job.startedAt ? Date.now() - job.startedAt.getTime() : 0;
+    if (job.progress > 0 || ageMs < 5 * 60 * 1000) return job.id;
+  }
   inflight.add(job.id);
 
   try {
-    await prisma.job.update({
-      where: { id: job.id },
+    const claimed = await prisma.job.updateMany({
+      where: {
+        id: job.id,
+        status: job.status === "RUNNING" ? "RUNNING" : { in: ["QUEUED", "FAILED"] },
+      },
       data: { status: "RUNNING", startedAt: new Date(), message: "Starting…", errorMessage: null },
     });
+    if (claimed.count === 0) return job.id;
 
     const progress = async (done: number, total: number, message?: string) => {
       await prisma.job.update({

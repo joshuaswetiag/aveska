@@ -53,10 +53,11 @@ const STEPS = [
   { key: "recommendations", label: "Recommendations" },
 ];
 
-function stepState(progress: number, index: number) {
+function stepState(progress: number, index: number, running: boolean) {
   const start = index * 25;
   if (progress >= start + 25) return "done";
-  if (progress >= start) return "active";
+  if (progress > start) return "active";
+  if (index === 0 && running && progress === 0) return "active";
   return "pending";
 }
 
@@ -96,9 +97,6 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({}),
         }).catch(() => undefined);
-        if (data.job?.id) {
-          await fetch(`/api/jobs/${data.job.id}/process`, { method: "POST" }).catch(() => undefined);
-        }
       }
       return data;
     } catch (err) {
@@ -128,7 +126,10 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
   if (status?.ready) return <>{children}</>;
 
   const progress = status?.job?.total ? Math.round((status.job.progress / status.job.total) * 100) : 0;
+  const running = status?.job?.status === "RUNNING";
+  const queued = status?.job?.status === "QUEUED";
   const failed = status?.job?.status === "FAILED";
+  const barWidth = running ? Math.max(progress, 4) : progress;
   const counts = status?.counts ?? {
     customers: 0,
     orders: 0,
@@ -155,14 +156,20 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
           </p>
         ) : null}
         {status?.job?.message ? <p className="mt-4 text-sm text-foreground">{status.job.message}</p> : null}
+        {queued ? (
+          <p className="mt-2 text-sm text-foreground">Waiting for the background worker to start this sync…</p>
+        ) : null}
+        {status?.job?.status ? (
+          <p className="mt-2 text-xs uppercase tracking-wide text-muted-foreground">Job {status.job.status}</p>
+        ) : null}
         {checking && !status ? <p className="mt-4 text-sm text-foreground">Starting full Aveska sync…</p> : null}
         <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
-          <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${Math.max(progress, 4)}%` }} />
+          <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${barWidth}%` }} />
         </div>
         <p className="mt-2 text-xs text-muted-foreground">{progress}% complete</p>
         <ol className="mt-5 space-y-2 text-sm">
           {STEPS.map((step, index) => {
-            const state = stepState(progress, index);
+            const state = stepState(progress, index, running);
             return (
               <li key={step.key} className="flex items-center justify-between">
                 <span className={state === "pending" ? "text-muted-foreground" : "text-foreground"}>{step.label}</span>

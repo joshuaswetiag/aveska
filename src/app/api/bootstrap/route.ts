@@ -36,7 +36,6 @@ export async function GET() {
     if (netoConfigured) {
       try {
         job = await ensureFullSyncQueued(session.user.id);
-        if (job && (job.status === "QUEUED" || job.status === "FAILED")) runJobInBackground(job.id);
       } catch (error) {
         console.error("Could not queue full sync", error);
       }
@@ -83,7 +82,7 @@ export async function POST(request: Request) {
   startJobWorker();
   const stats = await counts();
   const job = await ensureFullSyncQueued(session.user.id, Boolean(body.force));
-  if (job && (job.status === "QUEUED" || job.status === "FAILED" || job.status === "RUNNING")) {
+  if (job && job.status === "QUEUED") {
     runJobInBackground(job.id);
   }
   return NextResponse.json({ jobId: job?.id ?? null, started: Boolean(job), counts: stats });
