@@ -323,46 +323,52 @@ export async function extractCatalogueFitments(onProgress?: (done: number, total
   await pruneOrphanVehicles();
 }
 
-export async function extractOrderVehicles(onProgress?: (done: number, total: number) => Promise<void>) {
+export async function extractOrderVehicles(onProgress?: (done: number, total: number, message?: string) => Promise<void>) {
   const learned = await loadLearnedKnowledge();
-  const items = await prisma.orderItem.findMany({ include: { order: true, product: true } });
+  const total = await prisma.orderItem.count();
+  await onProgress?.(0, Math.max(total, 1), `Re-reading vehicles from ${total.toLocaleString()} order lines`);
   let done = 0;
-  for (const item of items) {
-    const extraction = extractVehicle(
-      {
-        name: item.productName,
-        sku: item.sku,
-        category: item.category,
-        make: item.product?.make,
-        model: item.product?.model,
-        series: item.product?.series,
-        fitment: item.product?.fitment,
-        bodyType: item.product?.bodyType,
-      },
-      learned,
-    );
-    await prisma.orderItem.update({
-      where: { id: item.id },
-      data: {
-        extractedVehicle: extraction as object,
-        extractionConfidence: extraction.confidence,
-      },
+  let cursor: string | undefined;
+
+  for (;;) {
+    const items = await prisma.orderItem.findMany({
+      take: 200,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      orderBy: { id: "asc" },
+      include: { product: true },
     });
-    await linkCustomerVehicleFromExtraction(item.order.customerId, extraction, extraction.confidence);
-    done += 1;
-    if (onProgress && done % 25 === 0) await onProgress(done, items.length);
+    if (!items.length) break;
+    cursor = items[items.length - 1].id;
+
+    for (const item of items) {
+      const extraction = extractVehicle(
+        {
+          name: item.productName,
+          sku: item.sku,
+          category: item.category,
+          make: item.product?.make,
+          model: item.product?.model,
+          series: item.product?.series,
+          fitment: item.product?.fitment,
+          bodyType: item.product?.bodyType,
+        },
+        learned,
+      );
+      await prisma.orderItem.update({
+        where: { id: item.id },
+        data: {
+          extractedVehicle: extraction as object,
+          extractionConfidence: extraction.confidence,
+        },
+      });
+      done += 1;
+    }
+    await onProgress?.(done, Math.max(total, 1), `Re-read ${done.toLocaleString()} / ${total.toLocaleString()} order lines`);
   }
-  await prisma.$executeRaw`
-    UPDATE "Customer" AS c
-    SET "vehicleCount" = COALESCE(cv.count, 0)
-    FROM (
-      SELECT "customerId", COUNT(*)::int AS count
-      FROM "CustomerVehicle"
-      GROUP BY "customerId"
-    ) AS cv
-    WHERE c.id = cv."customerId"
-  `;
+
+  const links = await backfillCustomerVehiclesFromOrders(onProgress);
   await pruneProductTitleVehicles();
+  return links;
 }
 
 export async function pruneProductTitleVehicles() {

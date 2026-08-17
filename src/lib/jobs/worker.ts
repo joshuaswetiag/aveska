@@ -10,10 +10,7 @@ const ranAsScript = process.argv.some((arg) => arg.replace(/\\/g, "/").includes(
 
 async function recoverOrphanedJobs() {
   const result = await prisma.job.updateMany({
-    where: {
-      status: "RUNNING",
-      updatedAt: { lt: new Date(Date.now() - 90_000) },
-    },
+    where: { status: "RUNNING" },
     data: { status: "QUEUED", message: "Waiting for worker…" },
   });
   if (result.count) console.log(`Requeued ${result.count} interrupted job(s)`);

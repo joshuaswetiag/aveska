@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { syncNetoCatalogue } from "@/lib/catalogue/neto";
 import { syncNetoOrders } from "@/lib/catalogue/neto-orders";
-import { extractCatalogueFitments, backfillCustomerVehiclesFromOrders } from "@/lib/vehicle/persist";
+import { extractCatalogueFitments, extractOrderVehicles } from "@/lib/vehicle/persist";
 import { generateRecommendations } from "@/lib/recommendation/generate";
 
 export const FULL_SYNC_FROM = "2016-01-01";
@@ -54,8 +54,8 @@ export async function syncFullAveskaStore(
   });
 
   await onProgress?.(84, 100, "Matching vehicles from orders…");
-  await backfillCustomerVehiclesFromOrders(async (done, total, message) => {
-    await onProgress?.(84 + Math.round((done / Math.max(total, 1)) * 6), 100, message);
+  await extractOrderVehicles(async (done, total, message) => {
+    await onProgress?.(84 + Math.round((done / Math.max(total, 1)) * 6), 100, message ?? "Matching vehicles from orders…");
   });
 
   await onProgress?.(91, 100, "Building customer recommendations…");
