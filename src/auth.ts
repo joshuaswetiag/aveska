@@ -59,7 +59,14 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
     authorized({ auth, request }) {
       const path = request.nextUrl.pathname;
-      if (path.startsWith("/login") || path.startsWith("/api/auth") || path.startsWith("/t/")) return true;
+      if (
+        path.startsWith("/login") ||
+        path.startsWith("/api/auth") ||
+        path.startsWith("/api/health") ||
+        path.startsWith("/t/")
+      ) {
+        return true;
+      }
       return Boolean(auth);
     },
   },
