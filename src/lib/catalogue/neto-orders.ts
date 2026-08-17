@@ -171,7 +171,7 @@ export async function syncNetoOrders(
     products.filter((product) => product.skuNormalized).map((product) => [product.skuNormalized as string, product]),
   );
   const customerByEmail = new Map(
-    (await prisma.customer.findMany({ where: { emailNormalized: { not: null } }, select: { id: true, emailNormalized: true, name: true } })).map(
+    (await prisma.customer.findMany({ where: { emailNormalized: { not: null } }, select: { id: true, emailNormalized: true, name: true, externalId: true } })).map(
       (customer) => [customer.emailNormalized as string, customer],
     ),
   );
@@ -221,7 +221,7 @@ export async function syncNetoOrders(
             originalData: { username: netoOrder.Username, orderId } as object,
           },
         });
-        customer = { id: createdCustomer.id, emailNormalized: email, name };
+        customer = { id: createdCustomer.id, emailNormalized: email, name, externalId: createdCustomer.externalId };
         if (email) customerByEmail.set(email, customer);
         if (username) customerByUsername.set(username, customer);
       } else if (customer.name === "Unknown customer" || customer.name.startsWith("Neto customer")) {

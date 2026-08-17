@@ -1,5 +1,7 @@
-import type { EmailCopy, TemplateVariables } from "@/types";
-import { AVESKA_RED, resolveEmailLogoSrc } from "@/lib/email/logo";
+import type { EmailCopy } from "@/types";
+import { AVESKA_RED, resolveEmailLogoSrc } from "@/lib/email/brand";
+
+export { applyTemplate } from "@/lib/email/apply-template";
 
 export interface EmailProvider {
   name: string;
@@ -32,13 +34,6 @@ export class ExportOnlyEmailProvider implements EmailProvider {
 
 export function getEmailProvider(): EmailProvider {
   return new ExportOnlyEmailProvider();
-}
-
-export function applyTemplate(template: string, vars: Partial<TemplateVariables>): string {
-  return template.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_, key: string) => {
-    const value = vars[key as keyof TemplateVariables];
-    return value ?? "";
-  });
 }
 
 export function renderEmailHtml(

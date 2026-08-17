@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils";
 import { formatFromHeader, getMailConfig } from "@/lib/email/config";
-import { restyleCampaignHtml } from "@/lib/email/logo";
+import { restyleCampaignHtml } from "@/lib/email/brand";
 import { wrapEmailHtmlForTracking } from "@/lib/email/tracking";
 import { resolveTrackingBaseUrl } from "@/lib/email/tracking-record";
 import { loadMailSettings } from "@/lib/email/settings-store";
@@ -101,7 +101,7 @@ export async function sendCampaign(
         trackingBase ?? "",
       );
       const subject = recipient?.subject || campaign.subject || campaign.name;
-      await options.onProgress?.(index, candidates.length, `Sending ${index + 1} / ${candidates.length}`);
+      await options?.onProgress?.(index, candidates.length, `Sending ${index + 1} / ${candidates.length}`);
       if (!recipient || !to || !html) {
         failed += 1;
         continue;
@@ -137,7 +137,7 @@ export async function sendCampaign(
     });
   }
 
-  await options.onProgress?.(candidates.length, candidates.length, `Sent ${sent}, failed ${failed}`);
+  await options?.onProgress?.(candidates.length, candidates.length, `Sent ${sent}, failed ${failed}`);
   if (sent === 0 && failed > 0) {
     throw new Error(errors[0] || "All emails failed to send.");
   }

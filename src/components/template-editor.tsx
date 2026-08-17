@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/input";
-import { applyTemplate } from "@/lib/email/provider";
+import { applyTemplate } from "@/lib/email/apply-template";
 import { toast } from "sonner";
 
 const SAMPLE = {

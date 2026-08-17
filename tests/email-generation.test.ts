@@ -72,7 +72,8 @@ describe("email generation", () => {
   });
 
   it("restyles stored emails onto the white Aveska template", async () => {
-    const { restyleCampaignHtml, htmlWithInlineLogo, AVESKA_LOGO_URL, AVESKA_RED } = await import("@/lib/email/logo");
+    const { htmlWithInlineLogo } = await import("@/lib/email/logo");
+    const { restyleCampaignHtml, AVESKA_LOGO_URL, AVESKA_RED } = await import("@/lib/email/brand");
     const oldHtml = `<img class="email-logo" src="data:image/png;base64,abc" /><a style="background:#9a3412">Shop</a><td style="background:#000000">`;
     const restyled = restyleCampaignHtml(oldHtml);
     expect(restyled).toContain(AVESKA_LOGO_URL);
