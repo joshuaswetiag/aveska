@@ -1,9 +1,9 @@
-import { setImmediate as nodeImmediate } from "node:timers";
 import { processNextJob } from "@/lib/jobs/queue";
 import { prisma } from "@/lib/db";
 
 declare global {
   var aveskaJobWorkerStarted: boolean | undefined;
+  var aveskaJobWorkerBusy: boolean | undefined;
 }
 
 const ranAsScript = process.argv.some((arg) => arg.replace(/\\/g, "/").includes("jobs/worker"));
@@ -12,26 +12,46 @@ async function recoverOrphanedJobs() {
   const result = await prisma.job.updateMany({
     where: {
       status: "RUNNING",
-      OR: [{ startedAt: null }, { startedAt: { lt: new Date(Date.now() - 30_000) } }],
+      updatedAt: { lt: new Date(Date.now() - 90_000) },
     },
     data: { status: "QUEUED", message: "Waiting for worker…" },
   });
   if (result.count) console.log(`Requeued ${result.count} interrupted job(s)`);
 }
 
+async function nextJob() {
+  return prisma.job.findFirst({
+    where: {
+      OR: [
+        { status: "QUEUED" },
+        { status: "RUNNING", updatedAt: { lt: new Date(Date.now() - 90_000) } },
+      ],
+    },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
+async function tick() {
+  if (globalThis.aveskaJobWorkerBusy) return;
+  globalThis.aveskaJobWorkerBusy = true;
+  try {
+    const job = await nextJob();
+    if (job) await processNextJob(job.id);
+  } finally {
+    globalThis.aveskaJobWorkerBusy = false;
+  }
+}
+
 async function loop() {
   console.log("Aveska job worker started");
   for (;;) {
     try {
-      const queued = await prisma.job.findFirst({
-        where: { status: "QUEUED" },
-        orderBy: { createdAt: "asc" },
-      });
-      if (queued) {
+      const job = await nextJob();
+      if (job) {
         try {
-          await processNextJob(queued.id);
+          await processNextJob(job.id);
         } catch (error) {
-          console.error("Job failed", queued.id, error);
+          console.error("Job failed", job.id, error);
         }
       } else {
         await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -46,17 +66,16 @@ async function loop() {
 export function startJobWorker() {
   if (globalThis.aveskaJobWorkerStarted) return;
   globalThis.aveskaJobWorkerStarted = true;
-  nodeImmediate(() => {
-    void loop().catch((error) => {
-      globalThis.aveskaJobWorkerStarted = false;
-      console.error("Job worker stopped", error);
-    });
-  });
+  console.log("Aveska in-process job worker started");
+  void tick().catch((error) => console.error("Job worker tick failed", error));
+  setInterval(() => {
+    void tick().catch((error) => console.error("Job worker tick failed", error));
+  }, 2000);
 }
 
 if (ranAsScript) {
   void recoverOrphanedJobs()
-    .then(() => startJobWorker())
+    .then(() => loop())
     .catch((error) => {
       console.error("Job worker failed to start", error);
       process.exit(1);

@@ -9,6 +9,8 @@ type BootstrapStatus = {
   ready: boolean;
   netoConfigured: boolean;
   needsSync: boolean;
+  enqueueError?: string | null;
+  workerStarted?: boolean;
   from?: string;
   to?: string;
   job: {
@@ -64,6 +66,7 @@ function stepState(progress: number, index: number, running: boolean) {
 export function BootstrapGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const started = useRef(false);
+  const processing = useRef(false);
   const [status, setStatus] = useState<BootstrapStatus | null>(null);
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(true);
@@ -80,23 +83,40 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
 
   async function load(startIfNeeded = false) {
     try {
-      const res = await fetch("/api/bootstrap");
-      const data = await readJson(res);
+      const res = await fetch("/api/bootstrap", { cache: "no-store" });
+      let data = await readJson(res);
       if (!res.ok) {
         setStatus((current) => current ?? { ...EMPTY_STATUS, netoConfigured: data.netoConfigured ?? false, needsSync: true, ready: false, job: null });
         setError(data.error ?? "Could not check Aveska sync");
         setChecking(false);
         return data;
       }
-      setStatus(data);
-      setError("");
-      setChecking(false);
       if (startIfNeeded && data.netoConfigured && data.needsSync) {
-        await fetch("/api/bootstrap", {
+        const posted = await fetch("/api/bootstrap", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({}),
+          cache: "no-store",
         }).catch(() => undefined);
+        if (posted && !posted.ok) {
+          const postedBody = await readJson(posted).catch(() => ({ error: "Could not start sync" }));
+          setError(postedBody.error ?? "Could not start sync");
+        } else {
+          const again = await fetch("/api/bootstrap", { cache: "no-store" });
+          if (again.ok) data = await readJson(again);
+        }
+      }
+      setStatus(data);
+      setError(data.enqueueError ?? "");
+      setChecking(false);
+      const jobId = data.job?.id;
+      if (jobId && (data.job?.status === "QUEUED" || data.job?.status === "RUNNING") && !processing.current) {
+        processing.current = true;
+        void fetch(`/api/jobs/${jobId}/process`, { method: "POST", cache: "no-store" })
+          .catch(() => undefined)
+          .finally(() => {
+            processing.current = false;
+          });
       }
       return data;
     } catch (err) {
@@ -155,7 +175,11 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
             This running app does not have NETO_API_KEY yet. After adding it on the aveska service, click Redeploy, then refresh.
           </p>
         ) : null}
+        {status?.enqueueError ? <p className="mt-4 text-sm text-danger">{status.enqueueError}</p> : null}
         {status?.job?.message ? <p className="mt-4 text-sm text-foreground">{status.job.message}</p> : null}
+        {!status?.job && status && status.netoConfigured ? (
+          <p className="mt-4 text-sm text-foreground">The sync job has not started yet.</p>
+        ) : null}
         {queued ? (
           <p className="mt-2 text-sm text-foreground">Waiting for the background worker to start this sync…</p>
         ) : null}
@@ -206,23 +230,27 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
             <dd className="font-display text-lg">{counts.recommendations.toLocaleString()}</dd>
           </div>
         </dl>
-        {failed || error ? (
+        {failed || error || !status?.job ? (
           <div className="mt-5 space-y-3">
-            <p className="text-sm text-danger">{error || status?.job?.errorMessage || "Sync failed"}</p>
+            {error || status?.job?.errorMessage ? (
+              <p className="text-sm text-danger">{error || status?.job?.errorMessage}</p>
+            ) : null}
             <Button
               onClick={async () => {
                 started.current = false;
+                processing.current = false;
                 const res = await fetch("/api/bootstrap", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ force: true }),
+                  cache: "no-store",
                 });
-                const data = await res.json();
+                const data = await readJson(res);
                 if (!res.ok) setError(data.error ?? "Could not restart sync");
                 else void load(true);
               }}
             >
-              Try again
+              Start sync
             </Button>
           </div>
         ) : (

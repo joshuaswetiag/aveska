@@ -1,10 +1,31 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
-import { runJobInBackground } from "@/lib/jobs/run-in-background";
+import { processNextJob } from "@/lib/jobs/queue";
 import { startJobWorker } from "@/lib/jobs/worker";
 import { FULL_SYNC_FROM, ensureFullSyncQueued, listFullSyncJobs } from "@/lib/catalogue/full-sync";
 import { storeIsoDate } from "@/lib/utils";
+
+export const dynamic = "force-dynamic";
+
+function serializeJob(job: {
+  id: string;
+  status: string;
+  progress: number;
+  total: number;
+  message: string | null;
+  errorMessage: string | null;
+} | null) {
+  if (!job) return null;
+  return {
+    id: job.id,
+    status: job.status,
+    progress: job.progress,
+    total: job.total,
+    message: job.message,
+    errorMessage: job.errorMessage,
+  };
+}
 
 async function counts() {
   const [customers, orders, products, vehicles, recommendations, revenue] = await Promise.all([
@@ -25,18 +46,29 @@ async function counts() {
   };
 }
 
+function json(body: object, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
+}
+
 export async function GET() {
   try {
     const session = await auth();
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!session?.user) return json({ error: "Unauthorized" }, 401);
+    startJobWorker();
     const netoConfigured = Boolean(process.env.NETO_API_KEY?.trim());
     const stats = await counts();
-    startJobWorker();
     let job = null as Awaited<ReturnType<typeof ensureFullSyncQueued>>;
-    if (netoConfigured) {
+    let enqueueError = "";
+    if (!netoConfigured) {
+      enqueueError = "NETO_API_KEY is not set on this running app.";
+    } else {
       try {
         job = await ensureFullSyncQueued(session.user.id);
       } catch (error) {
+        enqueueError = error instanceof Error ? error.message : "Could not queue full sync";
         console.error("Could not queue full sync", error);
       }
     }
@@ -45,11 +77,13 @@ export async function GET() {
     const completed = fullJobs.find((row) => row.status === "COMPLETED") ?? null;
     const failed = !active ? fullJobs.find((row) => row.status === "FAILED") ?? null : null;
     const ready = !active && Boolean(completed) && stats.products > 0 && stats.orders > 0;
-    return NextResponse.json({
+    return json({
       ready,
       netoConfigured,
       needsSync: !ready,
-      job: active ?? failed ?? completed ?? job,
+      enqueueError: enqueueError || null,
+      workerStarted: Boolean(globalThis.aveskaJobWorkerStarted),
+      job: serializeJob(active ?? failed ?? completed ?? job),
       counts: stats,
       from: FULL_SYNC_FROM,
       to: storeIsoDate(),
@@ -57,7 +91,7 @@ export async function GET() {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Bootstrap check failed";
     console.error("GET /api/bootstrap", error);
-    return NextResponse.json(
+    return json(
       {
         error: message,
         ready: false,
@@ -66,24 +100,27 @@ export async function GET() {
         job: null,
         counts: { customers: 0, orders: 0, products: 0, vehicles: 0, recommendations: 0, revenue: 0 },
       },
-      { status: 500 },
+      500,
     );
   }
 }
 
 export async function POST(request: Request) {
   const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (session.user.role === "READONLY") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!session?.user) return json({ error: "Unauthorized" }, 401);
+  if (session.user.role === "READONLY") return json({ error: "Forbidden" }, 403);
   if (!process.env.NETO_API_KEY?.trim()) {
-    return NextResponse.json({ error: "NETO_API_KEY is not configured" }, { status: 400 });
+    return json({ error: "NETO_API_KEY is not configured" }, 400);
   }
   const body = (await request.json().catch(() => ({}))) as { force?: boolean };
   startJobWorker();
   const stats = await counts();
-  const job = await ensureFullSyncQueued(session.user.id, Boolean(body.force));
-  if (job && job.status === "QUEUED") {
-    runJobInBackground(job.id);
+  try {
+    const job = await ensureFullSyncQueued(session.user.id, Boolean(body.force));
+    return json({ jobId: job?.id ?? null, started: Boolean(job), job: serializeJob(job), counts: stats });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not start sync";
+    console.error("POST /api/bootstrap", error);
+    return json({ error: message, jobId: null, started: false, counts: stats }, 500);
   }
-  return NextResponse.json({ jobId: job?.id ?? null, started: Boolean(job), counts: stats });
 }

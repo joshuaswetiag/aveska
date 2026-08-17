@@ -43,8 +43,8 @@ export async function processNextJob(jobId?: string) {
   (globalThis as { aveskaJobsInFlight?: Set<string> }).aveskaJobsInFlight = inflight;
   if (inflight.has(job.id)) return job.id;
   if (job.status === "RUNNING") {
-    const ageMs = job.startedAt ? Date.now() - job.startedAt.getTime() : 0;
-    if (job.progress > 0 || ageMs < 5 * 60 * 1000) return job.id;
+    const staleMs = Date.now() - job.updatedAt.getTime();
+    if (staleMs < 90_000) return job.id;
   }
   inflight.add(job.id);
 

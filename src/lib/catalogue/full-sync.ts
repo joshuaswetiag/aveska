@@ -62,12 +62,23 @@ export async function syncFullAveskaStore(
 }
 
 export async function listFullSyncJobs() {
-  const jobs = await prisma.job.findMany({
-    where: { type: "NETO_SYNC" },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
-  return jobs.filter((job) => isFullSyncJob(job.payload));
+  try {
+    return await prisma.job.findMany({
+      where: {
+        type: "NETO_SYNC",
+        payload: { path: ["kind"], equals: "full" },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+  } catch {
+    const jobs = await prisma.job.findMany({
+      where: { type: "NETO_SYNC" },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+    return jobs.filter((job) => isFullSyncJob(job.payload));
+  }
 }
 
 export async function ensureFullSyncQueued(createdById?: string, force = false) {

@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
-import { runJobInBackground } from "@/lib/jobs/run-in-background";
+import { processNextJob } from "@/lib/jobs/queue";
+import { startJobWorker } from "@/lib/jobs/worker";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 800;
 
 export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -12,14 +16,14 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   if (job.status === "COMPLETED" || job.status === "CANCELLED") {
     return NextResponse.json(job);
   }
-  if (job.status === "FAILED") {
-    await prisma.job.update({
-      where: { id },
-      data: { status: "QUEUED", errorMessage: null, message: "Queued" },
-    });
-  }
-  if (job.status === "QUEUED" || job.status === "FAILED") {
-    runJobInBackground(id);
+  startJobWorker();
+  try {
+    await processNextJob(id);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Job failed";
+    console.error("POST /api/jobs/process", id, error);
+    const latest = await prisma.job.findUnique({ where: { id } });
+    return NextResponse.json({ error: message, job: latest }, { status: 500 });
   }
   return NextResponse.json(await prisma.job.findUnique({ where: { id } }));
 }
