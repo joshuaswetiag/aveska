@@ -99,7 +99,7 @@ NETO_API_KEY=<from local .env>
 NETO_API_USERNAME=<from local .env>
 ```
 
-Rename `Postgres` in `DATABASE_URL` if your database service has a different name.
+Rename `Postgres` in `DATABASE_URL` if your database service has a different name. The Postgres plugin only exposes `DATABASE_URL` (and `DATABASE_PUBLIC_URL`) — there is no `DATABASE_PRIVATE_URL` variable, so do not reference `${{Postgres.DATABASE_PRIVATE_URL}}` or the build will fail with "DATABASE_URL resolved to an empty string".
 
 4. **Settings → Networking → Generate Domain**. Redeploy once `AUTH_URL` can resolve.
 5. Migrations run automatically (`npx prisma migrate deploy` before each start). Seed once from Railway **Settings → one-off command**:
