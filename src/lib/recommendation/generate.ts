@@ -28,6 +28,7 @@ function profileFromVehicle(vehicle: {
 export async function generateRecommendations(options?: {
   customerId?: string;
   onProgress?: (done: number, total: number) => Promise<void>;
+  skipSegments?: boolean;
 }) {
   const settings = await prisma.settings.upsert({
     where: { id: "default" },
@@ -37,137 +38,152 @@ export async function generateRecommendations(options?: {
   const threshold = Number(settings.confidenceThreshold);
   const cooldown = settings.cooldownDays === 0 ? ("never" as const) : settings.cooldownDays;
 
-  const customers = await prisma.customer.findMany({
-    where: options?.customerId ? { id: options.customerId } : undefined,
-    include: {
-      vehicles: { include: { vehicle: true } },
-      orders: { include: { items: true } },
-    },
+  const products = await prisma.product.findMany({
+    include: { fitments: true, overrides: true },
   });
 
-  const products = await prisma.product.findMany({
-    include: { fitments: { include: { vehicle: true } }, overrides: true },
-  });
+  const customerWhere = options?.customerId ? { id: options.customerId } : { vehicles: { some: {} } };
+  const total = await prisma.customer.count({ where: customerWhere });
+  await options?.onProgress?.(0, Math.max(total, 1));
 
   let done = 0;
   let created = 0;
-  const total = customers.length;
+  let cursor: string | undefined;
 
-  for (const customer of customers) {
-    const purchasedSkus = customer.orders.flatMap((order) =>
-      order.items.map((item) => ({
-        sku: item.sku ?? item.productName,
-        purchasedAt: order.orderDate,
-      })),
-    );
-    const purchasedProductIds = new Set(
-      customer.orders.flatMap((o) => o.items.map((i) => i.productId).filter(Boolean) as string[]),
-    );
-    const purchasedTypes = customer.orders.flatMap((o) =>
-      o.items.map((i) => i.category).filter(Boolean),
-    ) as string[];
-
-    for (const customerVehicle of customer.vehicles) {
-      const customerProfile = profileFromVehicle(customerVehicle.vehicle);
-      for (const product of products) {
-        if (purchasedProductIds.has(product.id)) continue;
-
-        const negative = product.overrides.some((o) => !o.isCompatible) || product.fitments.some((f) => f.isNegative);
-        const positiveOverride = product.overrides.some(
-          (o) =>
-            o.isCompatible &&
-            (!o.make || o.make.toLowerCase() === customerVehicle.vehicle.make.toLowerCase()) &&
-            (!o.series.length || o.series.some((s) => customerVehicle.vehicle.series.includes(s))),
-        );
-        const explicitFitment = product.fitments.some(
-          (f) => !f.isNegative && f.vehicleId === customerVehicle.vehicleId,
-        );
-
-        const productProfile: FitmentProfile = {
-          make: product.make,
-          model: product.model,
-          vehicleFamily: product.vehicleFamily,
-          series: product.series,
-          bodyType: product.bodyType,
-          yearFrom: product.yearFrom,
-          yearTo: product.yearTo,
-          application: product.fitment,
-        };
-
-        const scored = scoreRecommendation({
-          customer: customerProfile,
-          product: {
-            ...productProfile,
-            sku: product.sku,
-            category: product.category,
-            fitment: product.fitment,
-            tags: product.tags,
-            discontinued: product.discontinued,
-            stockStatus: product.stockStatus,
-            explicitCompatibility: explicitFitment || positiveOverride,
-            negativeMatch: negative && !positiveOverride,
+  for (;;) {
+    const customers = await prisma.customer.findMany({
+      where: customerWhere,
+      take: 50,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      orderBy: { id: "asc" },
+      include: {
+        vehicles: { include: { vehicle: true } },
+        orders: {
+          select: {
+            orderDate: true,
+            items: { select: { sku: true, productId: true, productName: true, category: true } },
           },
-          purchasedSkus,
-          purchasedProductTypes: purchasedTypes,
-          cooldownDays: cooldown,
-          includeOutOfStock: settings.includeOutOfStock,
-          reduceScoreSameFamily: settings.reduceScoreSameFamily,
-          confidenceThreshold: threshold,
-        });
+        },
+      },
+    });
+    if (!customers.length) break;
+    cursor = customers[customers.length - 1].id;
 
-        if (scored.matchLevel === "INSUFFICIENT_DATA" && !scored.eligible) {
-          continue;
-        }
-        if (scored.score <= 0 && !scored.eligible) continue;
+    for (const customer of customers) {
+      const purchasedSkus = customer.orders.flatMap((order) =>
+        order.items.map((item) => ({
+          sku: item.sku ?? item.productName,
+          purchasedAt: order.orderDate,
+        })),
+      );
+      const purchasedProductIds = new Set(
+        customer.orders.flatMap((o) => o.items.map((i) => i.productId).filter(Boolean) as string[]),
+      );
+      const purchasedTypes = customer.orders.flatMap((o) => o.items.map((i) => i.category).filter(Boolean)) as string[];
 
-        const status = scored.eligible ? "GENERATED" : "NEEDS_REVIEW";
-        const rec = await prisma.recommendation.upsert({
-          where: {
-            customerId_productId_vehicleId: {
+      for (const customerVehicle of customer.vehicles) {
+        const customerProfile = profileFromVehicle(customerVehicle.vehicle);
+        const make = customerVehicle.vehicle.make.toLowerCase();
+        for (const product of products) {
+          if (purchasedProductIds.has(product.id)) continue;
+          const sameMake = product.make?.toLowerCase() === make;
+          const explicitFitment = product.fitments.some(
+            (f) => !f.isNegative && f.vehicleId === customerVehicle.vehicleId,
+          );
+          if (!sameMake && !explicitFitment) continue;
+
+          const negative = product.overrides.some((o) => !o.isCompatible) || product.fitments.some((f) => f.isNegative);
+          const positiveOverride = product.overrides.some(
+            (o) =>
+              o.isCompatible &&
+              (!o.make || o.make.toLowerCase() === customerVehicle.vehicle.make.toLowerCase()) &&
+              (!o.series.length || o.series.some((s) => customerVehicle.vehicle.series.includes(s))),
+          );
+
+          const productProfile: FitmentProfile = {
+            make: product.make,
+            model: product.model,
+            vehicleFamily: product.vehicleFamily,
+            series: product.series,
+            bodyType: product.bodyType,
+            yearFrom: product.yearFrom,
+            yearTo: product.yearTo,
+            application: product.fitment,
+          };
+
+          const scored = scoreRecommendation({
+            customer: customerProfile,
+            product: {
+              ...productProfile,
+              sku: product.sku,
+              category: product.category,
+              fitment: product.fitment,
+              tags: product.tags,
+              discontinued: product.discontinued,
+              stockStatus: product.stockStatus,
+              explicitCompatibility: explicitFitment || positiveOverride,
+              negativeMatch: negative && !positiveOverride,
+            },
+            purchasedSkus,
+            purchasedProductTypes: purchasedTypes,
+            cooldownDays: cooldown,
+            includeOutOfStock: settings.includeOutOfStock,
+            reduceScoreSameFamily: settings.reduceScoreSameFamily,
+            confidenceThreshold: threshold,
+          });
+
+          if (scored.matchLevel === "INSUFFICIENT_DATA" && !scored.eligible) continue;
+          if (scored.score <= 0 && !scored.eligible) continue;
+
+          const status = scored.eligible ? "GENERATED" : "NEEDS_REVIEW";
+          const rec = await prisma.recommendation.upsert({
+            where: {
+              customerId_productId_vehicleId: {
+                customerId: customer.id,
+                productId: product.id,
+                vehicleId: customerVehicle.vehicleId,
+              },
+            },
+            update: {
+              score: scored.score,
+              scoreRaw: scored.scoreRaw,
+              matchLevel: scored.matchLevel,
+              confidence: scored.confidence,
+              status,
+              customerVehicleId: customerVehicle.id,
+            },
+            create: {
               customerId: customer.id,
               productId: product.id,
               vehicleId: customerVehicle.vehicleId,
+              customerVehicleId: customerVehicle.id,
+              score: scored.score,
+              scoreRaw: scored.scoreRaw,
+              matchLevel: scored.matchLevel,
+              confidence: scored.confidence,
+              status,
             },
-          },
-          update: {
-            score: scored.score,
-            scoreRaw: scored.scoreRaw,
-            matchLevel: scored.matchLevel,
-            confidence: scored.confidence,
-            status,
-            customerVehicleId: customerVehicle.id,
-          },
-          create: {
-            customerId: customer.id,
-            productId: product.id,
-            vehicleId: customerVehicle.vehicleId,
-            customerVehicleId: customerVehicle.id,
-            score: scored.score,
-            scoreRaw: scored.scoreRaw,
-            matchLevel: scored.matchLevel,
-            confidence: scored.confidence,
-            status,
-          },
-        });
-        await prisma.recommendationReason.deleteMany({ where: { recommendationId: rec.id } });
-        if (scored.reasons.length) {
-          await prisma.recommendationReason.createMany({
-            data: scored.reasons.map((reason) => ({
-              recommendationId: rec.id,
-              code: reason.code,
-              label: reason.label,
-              points: reason.points,
-            })),
           });
+          await prisma.recommendationReason.deleteMany({ where: { recommendationId: rec.id } });
+          if (scored.reasons.length) {
+            await prisma.recommendationReason.createMany({
+              data: scored.reasons.map((reason) => ({
+                recommendationId: rec.id,
+                code: reason.code,
+                label: reason.label,
+                points: reason.points,
+              })),
+            });
+          }
+          created += 1;
         }
-        created += 1;
       }
+      done += 1;
+      if (options?.onProgress) await options.onProgress(done, Math.max(total, 1));
     }
-    done += 1;
-    if (options?.onProgress) await options.onProgress(done, total);
   }
 
-  await segmentCustomers();
+  if (!options?.skipSegments) await segmentCustomers();
   return { customers: total, recommendations: created };
 }
 

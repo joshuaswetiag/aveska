@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { syncNetoCatalogue } from "@/lib/catalogue/neto";
 import { syncNetoOrders } from "@/lib/catalogue/neto-orders";
-import { extractCatalogueFitments, extractOrderVehicles } from "@/lib/vehicle/persist";
+import { extractCatalogueFitments, backfillCustomerVehiclesFromOrders } from "@/lib/vehicle/persist";
 import { generateRecommendations } from "@/lib/recommendation/generate";
 
 export const FULL_SYNC_FROM = "2016-01-01";
@@ -26,15 +26,27 @@ async function scaled(
 
 export async function syncFullAveskaStore(
   onProgress?: (done: number, total: number, message?: string) => Promise<void>,
+  options?: { refreshNeto?: boolean },
 ) {
   const to = storeIsoDate();
   const from = FULL_SYNC_FROM;
+  const [productCount, orderCount] = await Promise.all([prisma.product.count(), prisma.order.count()]);
 
-  await onProgress?.(1, 100, "Syncing live Aveska products…");
-  const catalogue = await scaled(1, 34, onProgress, (progress) => syncNetoCatalogue(progress));
+  let catalogue: unknown = { skipped: true, imported: productCount };
+  if (options?.refreshNeto || productCount < 1000) {
+    await onProgress?.(1, 100, "Syncing live Aveska products…");
+    catalogue = await scaled(1, 34, onProgress, (progress) => syncNetoCatalogue(progress));
+  } else {
+    await onProgress?.(35, 100, `Using ${productCount.toLocaleString()} products already synced`);
+  }
 
-  await onProgress?.(36, 100, "Syncing customers, orders, and revenue…");
-  const orders = await scaled(36, 40, onProgress, (progress) => syncNetoOrders(progress, { from, to }));
+  let orders: unknown = { skipped: true, imported: orderCount };
+  if (options?.refreshNeto || orderCount < 1000) {
+    await onProgress?.(36, 100, "Syncing customers, orders, and revenue…");
+    orders = await scaled(36, 40, onProgress, (progress) => syncNetoOrders(progress, { from, to }));
+  } else {
+    await onProgress?.(76, 100, `Using ${orderCount.toLocaleString()} orders already synced`);
+  }
 
   await onProgress?.(77, 100, "Matching vehicles from the catalogue…");
   await extractCatalogueFitments(async (done, total) => {
@@ -42,12 +54,13 @@ export async function syncFullAveskaStore(
   });
 
   await onProgress?.(84, 100, "Matching vehicles from orders…");
-  await extractOrderVehicles(async (done, total) => {
-    await onProgress?.(84 + Math.round((done / Math.max(total, 1)) * 6), 100, "Matching vehicles from orders…");
+  await backfillCustomerVehiclesFromOrders(async (done, total, message) => {
+    await onProgress?.(84 + Math.round((done / Math.max(total, 1)) * 6), 100, message);
   });
 
   await onProgress?.(91, 100, "Building customer recommendations…");
   const recommendations = await generateRecommendations({
+    skipSegments: true,
     onProgress: async (done, total) => {
       await onProgress?.(
         91 + Math.round((done / Math.max(total, 1)) * 8),

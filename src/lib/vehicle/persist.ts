@@ -135,48 +135,60 @@ export async function linkCustomerVehicleFromExtraction(
 export async function backfillCustomerVehiclesFromOrders(
   onProgress?: (done: number, total: number, message?: string) => Promise<void>,
 ) {
-  const items = await prisma.orderItem.findMany({
-    where: { extractionConfidence: { gte: 0.5 } },
-    select: {
-      extractionConfidence: true,
-      extractedVehicle: true,
-      order: { select: { customerId: true } },
-    },
-  });
-  await onProgress?.(0, items.length, `Linking vehicles from ${items.length.toLocaleString()} order lines`);
+  const total = await prisma.orderItem.count({ where: { extractionConfidence: { gte: 0.5 } } });
+  await onProgress?.(0, Math.max(total, 1), `Linking vehicles from ${total.toLocaleString()} order lines`);
   const vehicleIds = new Map<string, string>();
   const links = new Map<string, { customerId: string; vehicleId: string; confidence: number }>();
   let done = 0;
-  for (const item of items) {
-    const extraction = item.extractedVehicle as VehicleExtraction | null;
-    if (!extraction || !isIdentifiedVehicle(extraction)) {
-      done += 1;
-      continue;
-    }
-    const canonicalName = canonicalVehicleName(extraction);
-    if (!canonicalName || looksLikeProductTitle(canonicalName)) {
-      done += 1;
-      continue;
-    }
-    let vehicleId = vehicleIds.get(canonicalName);
-    if (!vehicleId) {
-      const vehicle = await upsertVehicleFromExtraction(extraction);
-      if (!vehicle) {
+  let cursor: string | undefined;
+
+  for (;;) {
+    const items = await prisma.orderItem.findMany({
+      where: { extractionConfidence: { gte: 0.5 } },
+      take: 500,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      orderBy: { id: "asc" },
+      select: {
+        id: true,
+        extractionConfidence: true,
+        extractedVehicle: true,
+        order: { select: { customerId: true } },
+      },
+    });
+    if (!items.length) break;
+    cursor = items[items.length - 1].id;
+
+    for (const item of items) {
+      const extraction = item.extractedVehicle as VehicleExtraction | null;
+      if (!extraction || !isIdentifiedVehicle(extraction)) {
         done += 1;
         continue;
       }
-      vehicleId = vehicle.id;
-      vehicleIds.set(canonicalName, vehicleId);
+      const canonicalName = canonicalVehicleName(extraction);
+      if (!canonicalName || looksLikeProductTitle(canonicalName)) {
+        done += 1;
+        continue;
+      }
+      let vehicleId = vehicleIds.get(canonicalName);
+      if (!vehicleId) {
+        const vehicle = await upsertVehicleFromExtraction(extraction);
+        if (!vehicle) {
+          done += 1;
+          continue;
+        }
+        vehicleId = vehicle.id;
+        vehicleIds.set(canonicalName, vehicleId);
+      }
+      const confidence = Number(item.extractionConfidence ?? extraction.confidence ?? 0);
+      const key = `${item.order.customerId}:${vehicleId}`;
+      const existing = links.get(key);
+      if (!existing || confidence > existing.confidence) {
+        links.set(key, { customerId: item.order.customerId, vehicleId, confidence });
+      }
+      done += 1;
     }
-    const confidence = Number(item.extractionConfidence ?? extraction.confidence ?? 0);
-    const key = `${item.order.customerId}:${vehicleId}`;
-    const existing = links.get(key);
-    if (!existing || confidence > existing.confidence) {
-      links.set(key, { customerId: item.order.customerId, vehicleId, confidence });
-    }
-    done += 1;
-    if (onProgress && done % 500 === 0) {
-      await onProgress(done, items.length, `Prepared ${done.toLocaleString()} / ${items.length.toLocaleString()} order lines`);
+    if (onProgress) {
+      await onProgress(done, Math.max(total, 1), `Prepared ${done.toLocaleString()} / ${total.toLocaleString()} order lines`);
     }
   }
 
@@ -212,13 +224,14 @@ export async function backfillCustomerVehiclesFromOrders(
     WHERE c.id = cv."customerId"
   `;
 
-  return { items: items.length, vehicles: vehicleIds.size, links: rows.length };
+  return { items: total, vehicles: vehicleIds.size, links: rows.length };
 }
 
 export async function extractCatalogueFitments(onProgress?: (done: number, total: number) => Promise<void>) {
   const learned = await loadLearnedKnowledge();
   const products = await prisma.product.findMany();
   let done = 0;
+  await onProgress?.(0, Math.max(products.length, 1));
   for (const product of products) {
     const extraction = extractVehicle(
       {

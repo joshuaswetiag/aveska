@@ -56,10 +56,11 @@ const STEPS = [
 ];
 
 function stepState(progress: number, index: number, running: boolean) {
-  const start = index * 25;
-  if (progress >= start + 25) return "done";
-  if (progress > start) return "active";
-  if (index === 0 && running && progress === 0) return "active";
+  const starts = [0, 36, 77, 91];
+  const start = starts[index];
+  const next = starts[index + 1] ?? 101;
+  if (progress >= next) return "done";
+  if (progress >= start && (running || progress > start)) return "active";
   return "pending";
 }
 
