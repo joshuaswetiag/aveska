@@ -35,27 +35,33 @@ export async function processNextJob(jobId?: string) {
         where: { status: "QUEUED" },
         orderBy: { createdAt: "asc" },
       });
-  if (!job || (job.status !== "QUEUED" && job.status !== "RUNNING")) return null;
+  if (!job || job.status === "COMPLETED" || job.status === "CANCELLED") return job?.id ?? null;
+  if (job.status !== "QUEUED" && job.status !== "RUNNING" && job.status !== "FAILED") return null;
 
-  await prisma.job.update({
-    where: { id: job.id },
-    data: { status: "RUNNING", startedAt: new Date(), message: "Starting…" },
-  });
-
-  const progress = async (done: number, total: number, message?: string) => {
-    await prisma.job.update({
-      where: { id: job.id },
-      data: { progress: done, total, message: message ?? `Processing ${done} / ${total}` },
-    });
-    if (job.importJobId) {
-      await prisma.importJob.update({
-        where: { id: job.importJobId },
-        data: { processedRows: done, totalRows: total, status: "PROCESSING" },
-      });
-    }
-  };
+  const inflight = (globalThis as { aveskaJobsInFlight?: Set<string> }).aveskaJobsInFlight ?? new Set<string>();
+  (globalThis as { aveskaJobsInFlight?: Set<string> }).aveskaJobsInFlight = inflight;
+  if (inflight.has(job.id)) return job.id;
+  inflight.add(job.id);
 
   try {
+    await prisma.job.update({
+      where: { id: job.id },
+      data: { status: "RUNNING", startedAt: new Date(), message: "Starting…", errorMessage: null },
+    });
+
+    const progress = async (done: number, total: number, message?: string) => {
+      await prisma.job.update({
+        where: { id: job.id },
+        data: { progress: done, total, message: message ?? `Processing ${done} / ${total}` },
+      });
+      if (job.importJobId) {
+        await prisma.importJob.update({
+          where: { id: job.importJobId },
+          data: { processedRows: done, totalRows: total, status: "PROCESSING" },
+        });
+      }
+    };
+
     let result: object = {};
     if (job.type === "IMPORT" && job.importJobId) {
       const importJob = await prisma.importJob.findUniqueOrThrow({ where: { id: job.importJobId } });
@@ -146,5 +152,8 @@ export async function processNextJob(jobId?: string) {
       });
     }
     throw error;
+  } finally {
+    const inflight = (globalThis as { aveskaJobsInFlight?: Set<string> }).aveskaJobsInFlight;
+    inflight?.delete(job.id);
   }
 }

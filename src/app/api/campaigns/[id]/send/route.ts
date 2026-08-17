@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
 import { audit } from "@/lib/audit";
-import { enqueueJob, processNextJob } from "@/lib/jobs/queue";
+import { enqueueJob } from "@/lib/jobs/queue";
+import { runJobInBackground } from "@/lib/jobs/run-in-background";
 import { formatFromHeader, getMailConfig } from "@/lib/email/config";
 import { loadMailSettings } from "@/lib/email/settings-store";
 import { eligibleRecipients } from "@/lib/campaign/send-targets";
@@ -106,6 +107,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     entityId: id,
     metadata: { jobId: job.id, testTo, pending: summary.pending },
   });
-  void processNextJob(job.id).catch(() => undefined);
+  runJobInBackground(job.id);
   return NextResponse.json({ jobId: job.id, pending: summary.pending, test: Boolean(testTo) });
 }

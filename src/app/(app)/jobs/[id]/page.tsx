@@ -66,7 +66,9 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
           </Button>
         </div>
       ) : null}
-      {job.status === "QUEUED" || job.status === "FAILED" ? <JobProcessButton jobId={job.id} /> : null}
+      {job.status === "QUEUED" || job.status === "FAILED" || job.status === "RUNNING" ? (
+        <JobProcessButton jobId={job.id} />
+      ) : null}
       {job.status === "FAILED" && (job.payload as { campaignId?: string } | null)?.campaignId ? (
         <Button asChild variant="outline">
           <Link href={`/campaigns/${(job.payload as { campaignId: string }).campaignId}`}>Back to campaign</Link>

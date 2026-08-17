@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { enqueueJob, processNextJob } from "@/lib/jobs/queue";
+import { enqueueJob } from "@/lib/jobs/queue";
+import { runJobInBackground } from "@/lib/jobs/run-in-background";
 import { audit } from "@/lib/audit";
 
 export async function POST() {
@@ -12,6 +13,6 @@ export async function POST() {
   }
   const job = await enqueueJob({ type: "NETO_SYNC", createdById: session.user.id, total: 12642 });
   await audit({ userId: session.user.id, action: "neto_sync", entityType: "Job", entityId: job.id });
-  void processNextJob(job.id).catch(() => undefined);
+  runJobInBackground(job.id);
   return NextResponse.json({ jobId: job.id });
 }

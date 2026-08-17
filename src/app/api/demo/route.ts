@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { enqueueJob, processNextJob } from "@/lib/jobs/queue";
+import { enqueueJob } from "@/lib/jobs/queue";
+import { runJobInBackground } from "@/lib/jobs/run-in-background";
 import { audit } from "@/lib/audit";
 
 export async function POST() {
@@ -9,6 +10,6 @@ export async function POST() {
   if (session.user.role === "READONLY") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const job = await enqueueJob({ type: "DEMO", createdById: session.user.id });
   await audit({ userId: session.user.id, action: "demo", entityType: "Job", entityId: job.id });
-  void processNextJob(job.id).catch(() => undefined);
+  runJobInBackground(job.id);
   return NextResponse.json({ jobId: job.id });
 }

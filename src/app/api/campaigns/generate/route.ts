@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { generateCampaign } from "@/lib/campaign/generate";
-import { enqueueJob, processNextJob } from "@/lib/jobs/queue";
+import { enqueueJob } from "@/lib/jobs/queue";
+import { runJobInBackground } from "@/lib/jobs/run-in-background";
 import { audit } from "@/lib/audit";
 import type { CampaignType } from "@prisma/client";
 
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
       createdById: session.user.id,
     });
     await audit({ userId: session.user.id, action: "campaign_generate", entityType: "Job", entityId: job.id });
-    void processNextJob(job.id).catch(() => undefined);
+    runJobInBackground(job.id);
     return NextResponse.json({ jobId: job.id });
   }
 

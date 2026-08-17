@@ -3,7 +3,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
 import { mappingIssues } from "@/lib/import/columns";
 import type { ColumnMapping } from "@/types";
-import { enqueueJob, processNextJob } from "@/lib/jobs/queue";
+import { enqueueJob } from "@/lib/jobs/queue";
+import { runJobInBackground } from "@/lib/jobs/run-in-background";
 import { audit } from "@/lib/audit";
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -41,7 +42,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       total: importJob.totalRows,
     });
     await audit({ userId: session.user.id, action: "import_start", entityType: "ImportJob", entityId: id });
-    void processNextJob(job.id).catch(() => undefined);
+    runJobInBackground(job.id);
     return NextResponse.json({ jobId: job.id });
   }
 

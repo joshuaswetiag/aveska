@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { enqueueJob, processNextJob } from "@/lib/jobs/queue";
+import { enqueueJob } from "@/lib/jobs/queue";
+import { runJobInBackground } from "@/lib/jobs/run-in-background";
 import { audit } from "@/lib/audit";
 import { parseOrderSyncRange } from "@/lib/catalogue/neto-orders";
 
@@ -30,6 +31,6 @@ export async function POST(request: Request) {
     entityId: job.id,
     metadata: { from: range?.from ?? null, to: range?.to ?? null },
   });
-  void processNextJob(job.id).catch(() => undefined);
+  runJobInBackground(job.id);
   return NextResponse.json({ jobId: job.id, from: range?.from ?? null, to: range?.to ?? null });
 }
