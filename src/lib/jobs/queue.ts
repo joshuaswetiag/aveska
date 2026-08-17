@@ -54,7 +54,10 @@ export async function processNextJob(jobId?: string) {
         id: job.id,
         status: job.status === "RUNNING" ? "RUNNING" : { in: ["QUEUED", "FAILED"] },
       },
-      data: { status: "RUNNING", startedAt: new Date(), message: "Starting…", errorMessage: null },
+      data:
+        job.progress > 0
+          ? { status: "RUNNING", errorMessage: null }
+          : { status: "RUNNING", startedAt: new Date(), message: "Starting…", errorMessage: null },
     });
     if (claimed.count === 0) return job.id;
 
@@ -87,7 +90,11 @@ export async function processNextJob(jobId?: string) {
       await extractOrderVehicles(progress);
       result = { ok: true };
     } else if (job.type === "GENERATE_RECOMMENDATIONS") {
-      result = await generateRecommendations({ onProgress: progress });
+      await prisma.job.update({
+        where: { id: job.id },
+        data: { status: "CANCELLED", message: "Recommendation generation is paused", completedAt: new Date() },
+      });
+      return job.id;
     } else if (job.type === "ANALYSE_CUSTOMERS") {
       await extractCatalogueFitments(progress);
       await extractOrderVehicles(progress);

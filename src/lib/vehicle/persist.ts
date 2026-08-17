@@ -388,6 +388,112 @@ export async function extractCatalogueFitments(onProgress?: (done: number, total
   await pruneProductTitleVehicles();
 }
 
+export async function harvestVehiclesFromOrderLines(
+  onProgress?: (done: number, total: number, message?: string) => Promise<void>,
+) {
+  const learned = await loadLearnedKnowledge();
+  const existingNames = new Set(
+    (await prisma.vehicle.findMany({ select: { canonicalName: true } })).map((row) => row.canonicalName),
+  );
+  const total = await prisma.orderItem.count();
+  await onProgress?.(0, Math.max(total, 1), "Finding extra vehicles in orders…");
+  const toCreate = new Map<
+    string,
+    {
+      make: string;
+      model: string | null;
+      vehicleFamily: string | null;
+      series: string[];
+      bodyType: string | null;
+      yearFrom: number | null;
+      yearTo: number | null;
+      engine: string | null;
+      engineCode: string | null;
+      variant: string | null;
+      driveType: string | null;
+      application: string | null;
+      canonicalName: string;
+      searchableText: string;
+    }
+  >();
+  let scanned = 0;
+  let cursor: string | undefined;
+
+  for (;;) {
+    const items = await prisma.orderItem.findMany({
+      take: 500,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      orderBy: { id: "asc" },
+      select: {
+        id: true,
+        productName: true,
+        sku: true,
+        category: true,
+        extractedVehicle: true,
+        extractionConfidence: true,
+        product: { select: { make: true, model: true, series: true, fitment: true, bodyType: true } },
+      },
+    });
+    if (!items.length) break;
+    cursor = items[items.length - 1].id;
+
+    for (const item of items) {
+      scanned += 1;
+      const stored = item.extractedVehicle as VehicleExtraction | null;
+      const extraction =
+        stored?.make && Number(item.extractionConfidence ?? 0) >= 0.5
+          ? stored
+          : extractVehicle(
+              {
+                name: item.productName,
+                sku: item.sku,
+                category: item.category,
+                make: item.product?.make,
+                model: item.product?.model,
+                series: item.product?.series,
+                fitment: item.product?.fitment,
+                bodyType: item.product?.bodyType,
+              },
+              learned,
+            );
+      const canonicalName = canonicalVehicleName(extraction);
+      if (!canonicalName || looksLikeProductTitle(canonicalName)) continue;
+      if (!extraction.make && !(extraction.series ?? []).length) continue;
+      if (existingNames.has(canonicalName) || toCreate.has(canonicalName)) continue;
+      toCreate.set(canonicalName, {
+        make: extraction.make ?? "Unknown",
+        model: extraction.model,
+        vehicleFamily: extraction.vehicleFamily,
+        series: extraction.series ?? [],
+        bodyType: extraction.bodyType,
+        yearFrom: extraction.yearFrom,
+        yearTo: extraction.yearTo,
+        engine: extraction.engine,
+        engineCode: extraction.engineCode,
+        variant: extraction.variant,
+        driveType: extraction.driveType,
+        application: extraction.application,
+        canonicalName,
+        searchableText: vehicleSearchText({ ...extraction, aliases: extraction.vehicleAliases }),
+      });
+    }
+    await onProgress?.(
+      scanned,
+      Math.max(total, 1),
+      `Checked ${scanned.toLocaleString()} order lines, ${toCreate.size} extra vehicles`,
+    );
+  }
+
+  const rows = [...toCreate.values()];
+  for (let index = 0; index < rows.length; index += 200) {
+    await prisma.vehicle.createMany({
+      data: rows.slice(index, index + 200),
+      skipDuplicates: true,
+    });
+  }
+  return { scanned, created: rows.length };
+}
+
 export async function extractOrderVehicles(onProgress?: (done: number, total: number, message?: string) => Promise<void>) {
   const learned = await loadLearnedKnowledge();
   const total = await prisma.orderItem.count();

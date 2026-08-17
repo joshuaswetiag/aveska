@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { syncNetoCatalogue } from "@/lib/catalogue/neto";
 import { syncNetoOrders } from "@/lib/catalogue/neto-orders";
-import { extractCatalogueFitments } from "@/lib/vehicle/persist";
+import { extractCatalogueFitments, harvestVehiclesFromOrderLines } from "@/lib/vehicle/persist";
 
 export const FULL_SYNC_FROM = "2016-01-01";
 
@@ -47,9 +47,19 @@ export async function syncFullAveskaStore(
     await onProgress?.(76, 100, `Using ${orderCount.toLocaleString()} orders already synced`);
   }
 
-  await onProgress?.(77, 100, "Matching vehicles from every product…");
-  await extractCatalogueFitments(async (done, total) => {
-    await onProgress?.(77 + Math.round((done / Math.max(total, 1)) * 22), 100, "Matching vehicles from every product…");
+  const vehicleCount = await prisma.vehicle.count();
+  if (vehicleCount < 3500) {
+    await onProgress?.(77, 100, "Matching vehicles from every product…");
+    await extractCatalogueFitments(async (done, total) => {
+      await onProgress?.(77 + Math.round((done / Math.max(total, 1)) * 11), 100, "Matching vehicles from every product…");
+    });
+  } else {
+    await onProgress?.(88, 100, "Product vehicles already matched");
+  }
+
+  await onProgress?.(88, 100, "Matching extra vehicles from orders…");
+  await harvestVehiclesFromOrderLines(async (done, total, message) => {
+    await onProgress?.(88 + Math.round((done / Math.max(total, 1)) * 11), 100, message);
   });
 
   await onProgress?.(100, 100, "Aveska store loaded");
@@ -79,15 +89,17 @@ export async function listFullSyncJobs() {
 export async function ensureFullSyncQueued(createdById?: string, force = false) {
   if (!process.env.NETO_API_KEY?.trim()) return null;
   const fullJobs = await listFullSyncJobs();
-  const active = fullJobs.find((job) => job.status === "QUEUED" || job.status === "RUNNING");
-  if (active) return active;
-  const [products, orders, vehicles] = await Promise.all([
-    prisma.product.count(),
-    prisma.order.count(),
-    prisma.vehicle.count(),
-  ]);
+  const activeJobs = fullJobs.filter((job) => job.status === "QUEUED" || job.status === "RUNNING");
+  if (activeJobs.length > 1) {
+    await prisma.job.updateMany({
+      where: { id: { in: activeJobs.slice(1).map((job) => job.id) } },
+      data: { status: "CANCELLED", message: "Superseded" },
+    });
+  }
+  if (activeJobs[0]) return activeJobs[0];
+  const [products, orders] = await Promise.all([prisma.product.count(), prisma.order.count()]);
   const completed = fullJobs.find((job) => job.status === "COMPLETED");
-  if (!force && completed && products > 0 && orders > 0 && vehicles >= 4300) return completed;
+  if (!force && products > 0 && orders > 0) return completed ?? null;
   return enqueueJob({
     type: "NETO_SYNC",
     payload: { kind: "full", from: FULL_SYNC_FROM, to: storeIsoDate() },
