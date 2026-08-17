@@ -77,7 +77,7 @@ export function MailSettingsForm({ mail, canEdit }: { mail: MailFormValues; canE
           <CardTitle>Bulk email / SMTP</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
-          <Badge variant={mail.configured ? "success" : "warning"}>{mail.configured ? "Ready to send" : "Not configured"}</Badge>
+          <Badge variant={mail.configured ? "success" : "warning"}>{mail.configured ? "Details saved" : "Not configured"}</Badge>
           <p className="text-muted-foreground">
             {mail.configured ? `From ${mail.from}${mail.hostLabel ? ` · ${mail.hostLabel}` : ""}` : "An admin can add SMTP under Settings."}
           </p>
@@ -100,7 +100,7 @@ export function MailSettingsForm({ mail, canEdit }: { mail: MailFormValues; canE
           }}
         >
           <div className="md:col-span-2 flex flex-wrap items-center gap-2 text-sm">
-            <Badge variant={mail.configured ? "success" : "warning"}>{mail.configured ? "Ready to send" : "Not configured"}</Badge>
+            <Badge variant={mail.configured ? "success" : "warning"}>{mail.configured ? "Details saved" : "Not configured"}</Badge>
             {mail.configured ? <span className="text-muted-foreground">{mail.from}{mail.hostLabel ? ` · ${mail.hostLabel}` : ""}</span> : null}
           </div>
           <div>
@@ -187,7 +187,9 @@ export function MailSettingsForm({ mail, canEdit }: { mail: MailFormValues; canE
             </>
           ) : null}
           <p className="text-xs text-muted-foreground md:col-span-2">
-            Passwords are stored on the server and never shown again. Leave a password blank to keep the saved value. SMTP username must be the full Gmail address, not the Google app name.
+            Saved details are not a live mail connection — use Test connection to prove this server can reach Gmail.
+            Railway Hobby/Trial blocks SMTP ports 25, 465 and 587, so Gmail from Railway only works on Pro.
+            Username must be the full Gmail address. Use a Google App Password, not the Google account password.
           </p>
           <div className="flex flex-wrap gap-2 md:col-span-2">
             <Button type="submit" disabled={pending}>

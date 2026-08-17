@@ -1,3 +1,4 @@
+import { lookup as dnsLookup } from "node:dns";
 import nodemailer from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import type { EmailProvider } from "@/lib/email/provider";
@@ -24,6 +25,24 @@ async function loadStoredMail(): Promise<StoredMailSettings | null> {
   return loadMailSettings();
 }
 
+export function explainSmtpError(host: string | null, port: number, error: unknown) {
+  const detail = error instanceof Error ? error.message : String(error);
+  const lower = detail.toLowerCase();
+  const target = `${host ?? "mail server"}:${port}`;
+  if (lower.includes("enetunreach") || /[0-9a-f]{1,4}:[0-9a-f:]+:[0-9a-f:]+/.test(lower)) {
+    return `Could not reach ${target} over IPv6. Gmail gave an IPv6 address this server cannot use. The mailer now connects over IPv4 only — retry the send. (${detail})`;
+  }
+  if (
+    lower.includes("timeout") ||
+    lower.includes("etimedout") ||
+    lower.includes("econnrefused") ||
+    lower.includes("ehostunreach")
+  ) {
+    return `Could not reach ${target}. Saved SMTP details are not a live connection. Railway Hobby/Trial blocks outbound SMTP (ports 25, 465, 587), so Gmail only works from this PC or on Railway Pro. (${detail})`;
+  }
+  return `Could not send via ${target}: ${detail}`;
+}
+
 function smtpOptions(stored: StoredMailSettings | null): SMTPTransport.Options {
   const config = getMailConfig(stored);
   if (!config.configured || !config.host) {
@@ -33,11 +52,16 @@ function smtpOptions(stored: StoredMailSettings | null): SMTPTransport.Options {
     host: config.host,
     port: config.port,
     secure: config.secure,
+    requireTLS: !config.secure && (config.port === 587 || config.port === 2525),
+    family: 4,
+    lookup(hostname, _options, callback) {
+      dnsLookup(hostname, { family: 4, all: false }, callback);
+    },
     auth: config.user ? { user: config.user, pass: getMailPassword(stored) } : undefined,
     connectionTimeout: 15_000,
     greetingTimeout: 15_000,
     socketTimeout: 30_000,
-    tls: { minVersion: "TLSv1.2" },
+    tls: { minVersion: "TLSv1.2", servername: config.host },
   };
 }
 
@@ -85,8 +109,7 @@ export class SmtpEmailProvider implements EmailProvider {
       });
       return { id: String(info.messageId || info.response || `smtp-${Date.now()}`) };
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      throw new Error(`Could not send via ${config.host}:${config.port}: ${detail}`);
+      throw new Error(explainSmtpError(config.host, config.port, error));
     }
   }
 
@@ -144,6 +167,10 @@ export async function verifyMailTransport(stored?: StoredMailSettings | null) {
   if (missing.length) {
     throw new Error(`Missing: ${missing.join(", ")}.`);
   }
-  await nodemailer.createTransport(smtpOptions(settings)).verify();
+  try {
+    await nodemailer.createTransport(smtpOptions(settings)).verify();
+  } catch (error) {
+    throw new Error(explainSmtpError(config.host, config.port, error));
+  }
   return { ok: true, from: formatFromHeader(config), host: `${config.host}:${config.port}` };
 }
