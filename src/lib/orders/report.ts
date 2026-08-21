@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { canonicalVehicleName } from "@/lib/vehicle/extract";
-import { formatDate, zonedDayRange } from "@/lib/utils";
+import { formatDate, parseNumber, zonedDayRange } from "@/lib/utils";
 import type { VehicleExtraction } from "@/types";
 import type { Prisma } from "@prisma/client";
 
@@ -133,6 +133,7 @@ const reportInclude = {
           },
         },
       },
+      items: { select: { lineTotal: true } },
     },
   },
 } satisfies Prisma.OrderItemInclude;
@@ -156,6 +157,20 @@ export function orderStatusLabel(order: { originalData: unknown }): string {
   return data?.OrderStatus?.trim() || "";
 }
 
+export function orderShippingAmount(order: {
+  originalData: unknown;
+  orderTotal?: { toString(): string } | number | string | null;
+  items?: Array<{ lineTotal?: { toString(): string } | number | string | null }>;
+}): number | null {
+  const stored = parseNumber((order.originalData as { ShippingTotal?: string | number } | null)?.ShippingTotal);
+  if (stored != null) return stored;
+  if (order.orderTotal == null || !order.items?.length) return null;
+  const total = Number(order.orderTotal);
+  if (!Number.isFinite(total)) return null;
+  const product = order.items.reduce((sum, item) => sum + (parseNumber(item.lineTotal) ?? 0), 0);
+  return Math.round((total - product) * 100) / 100;
+}
+
 export function orderReportExportRow(item: OrderReportItem) {
   return {
     Date: formatDate(item.order.orderDate),
@@ -169,6 +184,7 @@ export function orderReportExportRow(item: OrderReportItem) {
     Quantity: item.quantity,
     "Unit price": item.unitPrice != null ? Number(item.unitPrice) : "",
     "Line total": item.lineTotal != null ? Number(item.lineTotal) : "",
+    Shipping: orderShippingAmount(item.order) ?? "",
     "Order total": item.order.orderTotal != null ? Number(item.order.orderTotal) : "",
   };
 }
@@ -176,7 +192,8 @@ export function orderReportExportRow(item: OrderReportItem) {
 export async function fetchOrderReportPage(filters: OrderReportFilters) {
   const where = orderItemReportWhere(filters);
   const skip = (filters.page - 1) * ORDER_REPORT_PAGE_SIZE;
-  const [totalLines, items, aggregates, orderCount] = await Promise.all([
+  const orderWhere = orderReportOrderWhere(filters);
+  const [totalLines, items, aggregates, orderCount, orderTotals] = await Promise.all([
     prisma.orderItem.count({ where }),
     prisma.orderItem.findMany({
       where,
@@ -189,7 +206,11 @@ export async function fetchOrderReportPage(filters: OrderReportFilters) {
       where,
       _sum: { quantity: true, lineTotal: true },
     }),
-    prisma.order.count({ where: orderReportOrderWhere(filters) }),
+    prisma.order.count({ where: orderWhere }),
+    prisma.order.aggregate({
+      where: orderWhere,
+      _sum: { orderTotal: true },
+    }),
   ]);
   return {
     items,
@@ -197,6 +218,7 @@ export async function fetchOrderReportPage(filters: OrderReportFilters) {
     orderCount,
     quantity: aggregates._sum.quantity ?? 0,
     revenue: Number(aggregates._sum.lineTotal ?? 0),
+    orderRevenue: Number(orderTotals._sum.orderTotal ?? 0),
   };
 }
 

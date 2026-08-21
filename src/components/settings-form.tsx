@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { useState } from "react";
+import { isEphemeralTrackingOrigin } from "@/lib/email/tracking";
 
 type SettingsShape = {
   cooldownDays: number;
@@ -53,8 +54,9 @@ export function SettingsForm({ settings }: { settings: SettingsShape }) {
                 trackingUrl: form.get("trackingUrl"),
               }),
             });
+            const data = await res.json().catch(() => ({}));
             setPending(false);
-            if (!res.ok) toast.error("Could not save settings");
+            if (!res.ok) toast.error(data.error ?? "Could not save settings");
             else toast.success("Settings saved");
           }}
         >
@@ -81,15 +83,20 @@ export function SettingsForm({ settings }: { settings: SettingsShape }) {
               id="trackingUrl"
               name="trackingUrl"
               defaultValue={settings.trackingUrl}
-              placeholder="https://your-public-host.example"
+              placeholder="https://aveska-production.up.railway.app"
               className="mt-1"
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              For worldwide click tracking while this app stays on your PC, open a second terminal, run{" "}
-              <code className="rounded bg-muted px-1">npm run track:tunnel</code>, keep it running, then send emails.
-              That publishes an https address customers anywhere can reach. You can also paste a production https URL
-              here after you deploy. Do not use localhost — shoppers cannot open it.
+              Use the Railway https URL (Generate Domain), for example
+              https://aveska-production.up.railway.app. New emails wrap product clicks through that host so they work
+              worldwide with this PC off. Do not paste a trycloudflare tunnel.
             </p>
+            {isEphemeralTrackingOrigin(settings.trackingUrl) ? (
+              <p className="mt-1 text-xs text-amber-700">
+                A tunnel is still saved ({settings.trackingUrl}). Replace it with the Railway URL and send a new email.
+                Old tunnel links cannot be repaired.
+              </p>
+            ) : null}
           </div>
           <label className="flex items-center gap-2 text-sm">
             <Switch checked={includeOutOfStock} onCheckedChange={setIncludeOutOfStock} />

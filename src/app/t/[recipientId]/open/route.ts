@@ -2,6 +2,6 @@ import { trackingPixelResponse, recordCampaignTraffic } from "@/lib/email/tracki
 
 export async function GET(_: Request, { params }: { params: Promise<{ recipientId: string }> }) {
   const { recipientId } = await params;
-  await recordCampaignTraffic({ recipientId, type: "OPEN" }).catch(() => null);
+  await recordCampaignTraffic({ recipientId: decodeURIComponent(recipientId), type: "OPEN" }).catch(() => null);
   return trackingPixelResponse();
 }

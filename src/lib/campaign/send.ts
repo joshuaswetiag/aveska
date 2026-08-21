@@ -2,7 +2,7 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils";
 import { formatFromHeader, getMailConfig } from "@/lib/email/config";
 import { restyleCampaignHtml } from "@/lib/email/brand";
-import { wrapEmailHtmlForTracking } from "@/lib/email/tracking";
+import { wrapEmailHtmlForTracking, isStableTrackingOrigin } from "@/lib/email/tracking";
 import { resolveTrackingBaseUrl } from "@/lib/email/tracking-record";
 import { loadMailSettings } from "@/lib/email/settings-store";
 import { getEmailTransport } from "@/lib/email/smtp";
@@ -39,6 +39,11 @@ export async function sendCampaign(
     throw new Error("Email sending is not configured. Add SMTP details under Settings.");
   }
   const trackingBase = await resolveTrackingBaseUrl();
+  if (process.env.NODE_ENV === "production" && !isStableTrackingOrigin(trackingBase)) {
+    throw new Error(
+      "Set AUTH_URL and TRACKING_URL to the Railway https domain (Generate Domain) so click tracking works worldwide.",
+    );
+  }
 
   if (options?.testTo) {
     const sample = options.recipientId

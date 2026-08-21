@@ -1,5 +1,6 @@
 import { processNextJob } from "@/lib/jobs/queue";
 import { prisma } from "@/lib/db";
+import { ensureRailwayTrackingUrl } from "@/lib/email/tracking-record";
 
 declare global {
   var aveskaJobWorkerStarted: boolean | undefined;
@@ -104,6 +105,7 @@ export function startJobWorker() {
 
 if (ranAsScript) {
   void recoverOrphanedJobs()
+    .then(() => ensureRailwayTrackingUrl())
     .then(() => loop())
     .catch((error) => {
       console.error("Job worker failed to start", error);

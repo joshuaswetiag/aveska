@@ -124,7 +124,15 @@ function timeZoneOffsetMs(date: Date, timeZone: string): number {
   return asUtc - date.getTime();
 }
 
-/** Neto sends naive datetimes in UTC. */
+/** Format a UTC instant the way Neto GetOrder date filters expect. */
+export function toNetoUtcStamp(date: Date): string {
+  return date.toISOString().slice(0, 19).replace("T", " ");
+}
+
+/**
+ * Neto GetOrder timestamps are naive UTC. The admin UI then shows them in
+ * Australia/Sydney, so "today" on the live site is the Sydney calendar day.
+ */
 export function parseNetoDateTime(value?: string | null): Date | null {
   if (!value) return null;
   const trimmed = value.trim();

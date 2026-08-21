@@ -10,6 +10,7 @@ import {
   parseInteger,
   parseNumber,
   parseNetoDateTime,
+  toNetoUtcStamp,
   zonedDayRange,
 } from "@/lib/utils";
 
@@ -30,6 +31,8 @@ export type NetoOrder = {
   DatePaid?: string;
   DateUpdated?: string;
   GrandTotal?: string | number;
+  ShippingTotal?: string | number;
+  ShippingMethod?: string;
   BillFirstName?: string;
   BillLastName?: string;
   BillCompany?: string;
@@ -49,6 +52,8 @@ const ORDER_SELECTORS = [
   "DatePaid",
   "DateUpdated",
   "GrandTotal",
+  "ShippingTotal",
+  "ShippingMethod",
   "BillAddress",
   "ShipAddress",
   "BillFirstName",
@@ -75,6 +80,8 @@ const LIVE_STATUSES = [
   "Pending Dispatch",
   "Dispatched",
   "On Hold",
+  "Quote",
+  "Quote Sent",
 ];
 
 export type NetoOrderSyncOptions = {
@@ -101,15 +108,9 @@ export function parseOrderSyncRange(input: { from?: string | null; to?: string |
   return start <= end ? { from: start, to: end } : { from: end, to: start };
 }
 
-function netoApiDateTime(date: Date) {
-  return date.toISOString().slice(0, 19).replace("T", " ");
-}
-
 export function netoOrderDateFilters(range: { from: string; to: string }) {
-  const start = zonedDayRange(range.from).start;
-  const endInclusive = new Date(zonedDayRange(range.to).end.getTime() - 1000);
-  const fromStamp = netoApiDateTime(start);
-  const toStamp = netoApiDateTime(endInclusive);
+  const fromStamp = toNetoUtcStamp(zonedDayRange(range.from).start);
+  const toStamp = toNetoUtcStamp(new Date(zonedDayRange(range.to).end.getTime() - 1000));
   return {
     placed: { DatePlacedFrom: fromStamp, DatePlacedTo: toStamp },
     updated: { DateUpdatedFrom: fromStamp, DateUpdatedTo: toStamp },
@@ -250,6 +251,9 @@ export async function syncNetoOrders(
           DatePaid: netoOrder.DatePaid,
           DatePlaced: netoOrder.DatePlaced,
           DateUpdated: netoOrder.DateUpdated,
+          GrandTotal: netoOrder.GrandTotal,
+          ShippingTotal: netoOrder.ShippingTotal,
+          ShippingMethod: netoOrder.ShippingMethod,
         } as object,
       };
 
@@ -328,7 +332,7 @@ export async function syncNetoOrders(
 export async function repairNetoOrderDates() {
   const updated = await prisma.$executeRaw`
     UPDATE "Order"
-    SET "orderDate" = ("originalData"->>'DatePlaced')::timestamp
+    SET "orderDate" = (("originalData"->>'DatePlaced')::timestamp AT TIME ZONE 'UTC')
     WHERE "sourceRowHash" LIKE 'neto:%'
       AND NULLIF("originalData"->>'DatePlaced', '') IS NOT NULL
   `;
@@ -342,7 +346,7 @@ export async function refreshNetoOrderPlacedDates(from = "2026-08-01") {
   for (;;) {
     const result = await netoRequest<NetoOrder>("GetOrder", {
       Filter: {
-        DatePlacedFrom: `${from} 00:00:00`,
+        DatePlacedFrom: toNetoUtcStamp(zonedDayRange(from).start),
         Limit: 100,
         Page: page,
         OutputSelector: ["OrderID", "OrderStatus", "DatePlaced", "DatePaid"],

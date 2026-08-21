@@ -13,7 +13,7 @@ export type MailFormValues = {
   provider: string;
   from: string;
   hostLabel: string | null;
-  emailProvider: "export" | "smtp" | "maropost";
+  emailProvider: "export" | "smtp" | "maropost" | "resend";
   fromName: string;
   fromEmail: string;
   replyTo: string;
@@ -112,7 +112,8 @@ export function MailSettingsForm({ mail, canEdit }: { mail: MailFormValues; canE
               onChange={(e) => setProvider(e.target.value as MailFormValues["emailProvider"])}
             >
               <option value="export">Off — export only</option>
-              <option value="smtp">SMTP</option>
+              <option value="resend">Resend (HTTPS — works on Railway Hobby)</option>
+              <option value="smtp">SMTP (Gmail — Railway Pro only)</option>
               <option value="maropost">Maropost SMTP</option>
             </select>
           </div>
@@ -132,7 +133,20 @@ export function MailSettingsForm({ mail, canEdit }: { mail: MailFormValues; canE
             <Label htmlFor="replyTo">Reply-to</Label>
             <Input id="replyTo" name="replyTo" type="email" defaultValue={mail.replyTo} className="mt-1" />
           </div>
-          {provider !== "export" ? (
+          {provider === "resend" ? (
+            <div className="md:col-span-2">
+              <Label htmlFor="smtpPassword">Resend API key</Label>
+              <Input
+                id="smtpPassword"
+                name="smtpPassword"
+                type="password"
+                autoComplete="new-password"
+                placeholder={mail.smtpPasswordSet ? "Leave blank to keep the saved key" : "re_..."}
+                className="mt-1"
+              />
+            </div>
+          ) : null}
+          {provider === "smtp" || provider === "maropost" ? (
             <>
               <div>
                 <Label htmlFor="smtpHost">SMTP host</Label>
@@ -187,9 +201,9 @@ export function MailSettingsForm({ mail, canEdit }: { mail: MailFormValues; canE
             </>
           ) : null}
           <p className="text-xs text-muted-foreground md:col-span-2">
-            Saved details are not a live mail connection — use Test connection to prove this server can reach Gmail.
-            Railway Hobby/Trial blocks SMTP ports 25, 465 and 587, so Gmail from Railway only works on Pro.
-            Username must be the full Gmail address. Use a Google App Password, not the Google account password.
+            Railway Hobby cannot open Gmail SMTP (port 587). Use Resend over HTTPS: create an API key at resend.com,
+            verify aveska.com.au, and send from an address such as hello@aveska.com.au — not a Gmail address.
+            Gmail SMTP only works from this PC or after upgrading Railway to Pro.
           </p>
           <div className="flex flex-wrap gap-2 md:col-span-2">
             <Button type="submit" disabled={pending}>

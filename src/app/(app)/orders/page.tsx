@@ -8,6 +8,7 @@ import {
   ORDER_REPORT_PAGE_SIZE,
   fetchOrderReportPage,
   orderReportQueryString,
+  orderShippingAmount,
   orderStatusLabel,
   parseOrderReportFilters,
   vehicleLabelForOrderItem,
@@ -35,7 +36,7 @@ export default async function OrdersPage({
 }) {
   const params = await searchParams;
   const filters = parseOrderReportFilters(params);
-  const { items, totalLines, orderCount, quantity, revenue } = await fetchOrderReportPage(filters);
+  const { items, totalLines, orderCount, quantity, revenue, orderRevenue } = await fetchOrderReportPage(filters);
 
   const pageCount = Math.max(1, Math.ceil(totalLines / ORDER_REPORT_PAGE_SIZE));
   const fromRow = totalLines === 0 ? 0 : (filters.page - 1) * ORDER_REPORT_PAGE_SIZE + 1;
@@ -59,7 +60,8 @@ export default async function OrdersPage({
         <div>
           <h1 className="font-display text-3xl font-semibold">Order report</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Live Aveska Neto orders in Australia/Sydney time, matching the store calendar day.
+            Live Aveska Neto orders in Australia/Sydney time. Product lines are listed separately from postage; order
+            total matches the store (product plus shipping).
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -120,7 +122,7 @@ export default async function OrdersPage({
         </div>
       </form>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Card>
           <CardContent>
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Orders</div>
@@ -141,14 +143,20 @@ export default async function OrdersPage({
         </Card>
         <Card>
           <CardContent>
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Line revenue</div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">Product revenue</div>
             <div className="mt-1 font-display text-2xl">{formatCurrency(revenue)}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">Order total</div>
+            <div className="mt-1 font-display text-2xl">{formatCurrency(orderRevenue)}</div>
           </CardContent>
         </Card>
       </div>
 
       <div className="surface overflow-x-auto">
-        <table className="w-full min-w-[1100px] text-sm">
+        <table className="w-full min-w-[1240px] text-sm">
           <thead className="bg-muted text-left text-muted-foreground">
             <tr>
               <th className="p-3">Date</th>
@@ -161,6 +169,8 @@ export default async function OrdersPage({
               <th className="text-right">Qty</th>
               <th className="text-right">Unit price</th>
               <th className="text-right">Line total</th>
+              <th className="text-right">Shipping</th>
+              <th className="text-right">Order total</th>
             </tr>
           </thead>
           <tbody>
@@ -189,14 +199,16 @@ export default async function OrdersPage({
                   </td>
                   <td className="max-w-xs">{vehicle || "—"}</td>
                   <td className="text-right">{item.quantity}</td>
-                  <td className="text-right">{formatCurrency(item.unitPrice ? Number(item.unitPrice) : null)}</td>
-                  <td className="text-right">{formatCurrency(item.lineTotal ? Number(item.lineTotal) : null)}</td>
+                  <td className="text-right">{formatCurrency(item.unitPrice != null ? Number(item.unitPrice) : null)}</td>
+                  <td className="text-right">{formatCurrency(item.lineTotal != null ? Number(item.lineTotal) : null)}</td>
+                  <td className="text-right">{formatCurrency(orderShippingAmount(item.order))}</td>
+                  <td className="text-right">{formatCurrency(item.order.orderTotal != null ? Number(item.order.orderTotal) : null)}</td>
                 </tr>
               );
             })}
             {!items.length ? (
               <tr>
-                <td colSpan={10} className="p-6 text-sm text-muted-foreground">
+                <td colSpan={12} className="p-6 text-sm text-muted-foreground">
                   {totalLines === 0 && !filters.q && !filters.from && !filters.to ? (
                     <>
                       No live Neto orders in this database yet. Use <strong>Sync from Aveska</strong> above with today

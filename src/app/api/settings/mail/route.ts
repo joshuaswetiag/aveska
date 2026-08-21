@@ -10,6 +10,7 @@ function asText(value: unknown) {
 }
 
 function asInt(value: unknown, fallback: number) {
+  if (value == null || String(value).trim() === "") return fallback;
   const n = Number(value);
   return Number.isFinite(n) ? Math.trunc(n) : fallback;
 }

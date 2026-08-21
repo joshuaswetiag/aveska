@@ -1,6 +1,6 @@
 import { normalizeEmail } from "@/lib/utils";
 
-export type MailProviderName = "export" | "smtp" | "maropost";
+export type MailProviderName = "export" | "smtp" | "maropost" | "resend";
 
 export type StoredMailSettings = {
   emailProvider?: string | null;
@@ -47,7 +47,7 @@ function text(stored: string | null | undefined, envName: string) {
 
 export function parseMailProvider(raw: string | null | undefined): MailProviderName {
   const value = (raw ?? "export").trim().toLowerCase();
-  if (value === "smtp" || value === "maropost") return value;
+  if (value === "smtp" || value === "maropost" || value === "resend") return value;
   return "export";
 }
 
@@ -60,6 +60,9 @@ export function getMailProviderName(stored?: StoredMailSettings | null): MailPro
 
 export function getMailPassword(stored?: StoredMailSettings | null) {
   const provider = getMailProviderName(stored);
+  if (provider === "resend") {
+    return stored?.smtpPassword?.trim() || env("RESEND_API_KEY") || "";
+  }
   if (provider === "maropost") {
     return stored?.maropostApiKey?.trim() || stored?.smtpPassword?.trim() || env("MAROPOST_API_KEY") || env("SMTP_PASSWORD") || "";
   }
@@ -72,17 +75,21 @@ export function getMailConfig(
 ): MailConfig {
   const provider = getMailProviderName(stored);
   const maropost = provider === "maropost";
-  const host = text(stored?.smtpHost, "SMTP_HOST") ?? (maropost ? "smtp.maropost.com" : null);
-  const port = Number(stored?.smtpPort || env("SMTP_PORT") || (maropost ? "587" : "587")) || 587;
-  const secure = stored?.smtpSecure ?? ((env("SMTP_SECURE") ?? "false").toLowerCase() === "true" || port === 465);
+  const resend = provider === "resend";
+  const host = resend
+    ? "api.resend.com"
+    : text(stored?.smtpHost, "SMTP_HOST") ?? (maropost ? "smtp.maropost.com" : null);
+  const port = resend ? 443 : Number(stored?.smtpPort || env("SMTP_PORT") || (maropost ? "587" : "587")) || 587;
+  const secure = resend ? true : stored?.smtpSecure ?? ((env("SMTP_SECURE") ?? "false").toLowerCase() === "true" || port === 465);
   const user = text(stored?.smtpUser, "SMTP_USER") ?? (maropost ? "apikey" : null);
   const fromEmail = normalizeEmail(overrides?.fromEmail) ?? normalizeEmail(stored?.fromEmail) ?? normalizeEmail(env("SMTP_FROM"));
   const fromName = overrides?.fromName?.trim() || stored?.fromName?.trim() || env("SMTP_FROM_NAME") || "Aveska";
   const replyTo = normalizeEmail(overrides?.replyTo) ?? normalizeEmail(stored?.replyTo) ?? normalizeEmail(env("SMTP_REPLY_TO"));
   const password = getMailPassword(stored);
   const maropostAccountId = text(stored?.maropostAccountId, "MAROPOST_ACCOUNT_ID");
-  const configured =
-    provider !== "export" && Boolean(host && fromEmail && (maropost ? maropostAccountId && password : password));
+  const configured = resend
+    ? Boolean(fromEmail && password)
+    : provider !== "export" && Boolean(host && fromEmail && (maropost ? maropostAccountId && password : password));
 
   return {
     provider,
@@ -97,7 +104,7 @@ export function getMailConfig(
     delayMs: Math.max(0, Number(stored?.emailSendDelayMs ?? env("EMAIL_SEND_DELAY_MS") ?? "200") || 200),
     maropostAccountId,
     maropostCampaignName: text(stored?.maropostCampaignName, "MAROPOST_CAMPAIGN_NAME") ?? "aveska-intelligence",
-    smtpPasswordSet: Boolean(stored?.smtpPassword?.trim() || env("SMTP_PASSWORD")),
+    smtpPasswordSet: Boolean(stored?.smtpPassword?.trim() || env("SMTP_PASSWORD") || env("RESEND_API_KEY")),
     maropostApiKeySet: Boolean(stored?.maropostApiKey?.trim() || env("MAROPOST_API_KEY")),
   };
 }
@@ -105,7 +112,12 @@ export function getMailConfig(
 export function mailConfigGaps(stored?: StoredMailSettings | null) {
   const config = getMailConfig(stored);
   const missing: string[] = [];
-  if (config.provider === "export") missing.push("provider (choose SMTP)");
+  if (config.provider === "export") missing.push("provider (choose Resend or SMTP)");
+  if (config.provider === "resend") {
+    if (!config.fromEmail) missing.push("from email");
+    if (!getMailPassword(stored)) missing.push("Resend API key");
+    return { config, missing };
+  }
   if (!config.host) missing.push("SMTP host");
   if (!config.fromEmail) missing.push("from email");
   if (!getMailPassword(stored)) missing.push("password");

@@ -2,6 +2,7 @@ import { promises as dnsPromises, setDefaultResultOrder } from "node:dns";
 import nodemailer from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import type { EmailProvider } from "@/lib/email/provider";
+import { ResendEmailProvider, verifyResend } from "@/lib/email/resend";
 import { htmlWithInlineLogo } from "@/lib/email/logo";
 import { loadMailSettings } from "@/lib/email/settings-store";
 import {
@@ -38,7 +39,7 @@ export function explainSmtpError(host: string | null, port: number, error: unkno
     lower.includes("econnrefused") ||
     lower.includes("ehostunreach")
   ) {
-    return `Could not reach ${target}. Saved SMTP details are not a live connection. Railway Hobby/Trial blocks outbound SMTP (ports 25, 465, 587), so Gmail only works from this PC or on Railway Pro. (${detail})`;
+    return `Could not reach ${target}. Gmail SMTP is blocked on Railway Hobby/Trial (ports 25, 465, 587). Switch the provider to Resend (HTTPS) with an @aveska.com.au from-address, or upgrade to Railway Pro. (${detail})`;
   }
   return `Could not send via ${target}: ${detail}`;
 }
@@ -162,6 +163,7 @@ const disabledProvider: EmailProvider = {
 export async function getEmailTransport(): Promise<EmailProvider> {
   const stored = await loadStoredMail();
   const provider = getMailProviderName(stored);
+  if (provider === "resend") return new ResendEmailProvider(stored);
   if (provider === "smtp" || provider === "maropost") return new SmtpEmailProvider(stored);
   return disabledProvider;
 }
@@ -171,6 +173,9 @@ export async function verifyMailTransport(stored?: StoredMailSettings | null) {
   const { config, missing } = mailConfigGaps(settings);
   if (missing.length) {
     throw new Error(`Missing: ${missing.join(", ")}.`);
+  }
+  if (config.provider === "resend") {
+    return verifyResend(settings);
   }
   try {
     await nodemailer.createTransport(await smtpOptions(settings)).verify();

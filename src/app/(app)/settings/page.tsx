@@ -27,7 +27,7 @@ export default async function SettingsPage() {
           configured: mail.configured,
           provider: mail.provider,
           from: formatFromHeader(mail),
-          hostLabel: mail.host ? `${mail.host}:${mail.port}` : null,
+          hostLabel: mail.provider === "resend" ? "Resend HTTPS" : mail.host ? `${mail.host}:${mail.port}` : null,
           emailProvider: mail.provider,
           fromName: mailSettings?.fromName || settings.fromName,
           fromEmail: mailSettings?.fromEmail ?? "",

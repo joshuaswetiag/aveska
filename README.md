@@ -108,7 +108,9 @@ Rename `Postgres` in `DATABASE_URL` if your database service has a different nam
 npx tsx prisma/seed.ts
 ```
 
-6. Sign in, set **Settings → Public app URL** to the same https URL, save SMTP, then send campaigns. Click tracking works while Railway is running, with your PC off.
+6. Sign in, set **Settings → Public app URL** to that same Railway https URL, then send campaigns. Click tracking
+   works worldwide while Railway is running, with your PC off. Do not use a trycloudflare tunnel — those hostnames die
+   when they restart and cannot be repaired in already-sent emails.
 
 Do not commit `.env`. SMTP can stay in the app Settings after the first login.
 

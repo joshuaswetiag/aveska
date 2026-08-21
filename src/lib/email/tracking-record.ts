@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { randomBytes } from "crypto";
-import { isPublicTrackingOrigin, trackingLinkLabel } from "@/lib/email/tracking";
+import { isEphemeralTrackingOrigin, isStableTrackingOrigin, pickTrackingBaseUrl, railwayPublicOrigin, trackingLinkLabel } from "@/lib/email/tracking";
 
 export {
   publicAppUrl,
@@ -8,6 +8,8 @@ export {
   isAllowedTrackingDestination,
   trackingLinkLabel,
   isPublicTrackingOrigin,
+  isStableTrackingOrigin,
+  pickTrackingBaseUrl,
 } from "@/lib/email/tracking";
 
 const PIXEL = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
@@ -66,13 +68,31 @@ export async function saveTrackingUrl(url: string | null) {
 
 export async function resolveTrackingBaseUrl() {
   const stored = await loadTrackingUrl();
-  const fallback =
-    process.env.TRACKING_URL?.trim() ||
-    process.env.AUTH_URL?.trim() ||
-    process.env.NEXTAUTH_URL?.trim() ||
-    "";
-  const candidate = (stored || fallback).replace(/\/$/, "");
-  return isPublicTrackingOrigin(candidate) ? candidate : null;
+  const picked = pickTrackingBaseUrl({
+    stored,
+    trackingUrl: process.env.TRACKING_URL,
+    railwayPublicDomain: process.env.RAILWAY_PUBLIC_DOMAIN,
+    railwayStaticUrl: process.env.RAILWAY_STATIC_URL,
+    authUrl: process.env.AUTH_URL,
+    nextAuthUrl: process.env.NEXTAUTH_URL,
+    production: process.env.NODE_ENV === "production",
+  });
+  if (picked && isStableTrackingOrigin(picked) && isEphemeralTrackingOrigin(stored)) {
+    await saveTrackingUrl(picked).catch(() => null);
+  }
+  return picked;
+}
+
+export async function ensureRailwayTrackingUrl() {
+  const railway = railwayPublicOrigin();
+  if (!isStableTrackingOrigin(railway)) return resolveTrackingBaseUrl();
+  const stored = await loadTrackingUrl();
+  if (!isStableTrackingOrigin(stored) && railway) {
+    await saveTrackingUrl(railway).catch((error) => {
+      console.warn("Could not save Railway tracking URL", error);
+    });
+  }
+  return resolveTrackingBaseUrl();
 }
 
 export async function recordCampaignTraffic(input: {
@@ -87,7 +107,10 @@ export async function recordCampaignTraffic(input: {
     LIMIT 1
   `;
   const recipient = rows[0];
-  if (!recipient) return null;
+  if (!recipient) {
+    console.warn("Traffic not recorded: campaign recipient not found", input.recipientId, input.type);
+    return null;
+  }
   const label =
     input.type === "CLICK" && input.url ? trackingLinkLabel(input.url) : input.type === "OPEN" ? "Opened email" : null;
   await prisma.$executeRaw`
@@ -194,4 +217,34 @@ export async function trafficSummary(campaignId?: string) {
     opens: Number(opens[0]?.count ?? 0),
     clickers: Number(clickers[0]?.count ?? 0),
   };
+}
+
+export async function deleteTrafficEvent(id: string) {
+  const row = await prisma.campaignTraffic.findUnique({ where: { id } });
+  if (!row) return false;
+  await prisma.campaignTraffic.delete({ where: { id } });
+  const remaining = await prisma.campaignTraffic.findMany({
+    where: { recipientId: row.recipientId },
+    select: { type: true },
+  });
+  const stillClicked = remaining.some((event) => event.type === "CLICK");
+  const stillOpened = remaining.some((event) => event.type === "OPEN" || event.type === "CLICK");
+  await prisma.campaignRecipient.update({
+    where: { id: row.recipientId },
+    data: {
+      clicked: stillClicked,
+      opened: stillOpened,
+      clickedAt: stillClicked ? undefined : null,
+      openedAt: stillOpened ? undefined : null,
+    },
+  });
+  return true;
+}
+
+export async function clearAllTraffic() {
+  await prisma.campaignTraffic.deleteMany();
+  await prisma.campaignRecipient.updateMany({
+    data: { opened: false, clicked: false, openedAt: null, clickedAt: null },
+  });
+  await prisma.campaign.updateMany({ data: { opened: 0, clicked: 0 } });
 }
