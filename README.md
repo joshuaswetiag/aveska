@@ -92,6 +92,10 @@ DATABASE_URL=${{Postgres.DATABASE_URL}}
 AUTH_SECRET=<long random string>
 AUTH_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
 TRACKING_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=re_your_key
+SMTP_FROM=hello@aveska.com.au
+SMTP_FROM_NAME=Aveska
 ADMIN_EMAIL=admin@aveska.local
 ADMIN_PASSWORD=<strong password, not change-me>
 NETO_API_URL=https://www.aveska.com.au/do/WS/NetoAPI
@@ -112,7 +116,7 @@ npx tsx prisma/seed.ts
    works worldwide while Railway is running, with your PC off. Do not use a trycloudflare tunnel — those hostnames die
    when they restart and cannot be repaired in already-sent emails.
 
-Do not commit `.env`. SMTP can stay in the app Settings after the first login.
+Do not commit `.env`. Railway Hobby cannot send Gmail SMTP; use Resend (HTTPS) as above, or upgrade to Pro.
 
 ## Importing orders
 

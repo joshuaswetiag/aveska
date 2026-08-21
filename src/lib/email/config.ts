@@ -40,6 +40,10 @@ function env(name: string) {
   return value || null;
 }
 
+export function runningOnRailway() {
+  return Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
+}
+
 function text(stored: string | null | undefined, envName: string) {
   const value = stored?.trim();
   return value || env(envName);
@@ -52,16 +56,22 @@ export function parseMailProvider(raw: string | null | undefined): MailProviderN
 }
 
 export function getMailProviderName(stored?: StoredMailSettings | null): MailProviderName {
+  const fromEnv = parseMailProvider(env("EMAIL_PROVIDER"));
+  if (runningOnRailway() && fromEnv === "resend") return "resend";
   if (stored?.emailProvider != null && stored.emailProvider !== "") {
     return parseMailProvider(stored.emailProvider);
   }
-  return parseMailProvider(env("EMAIL_PROVIDER"));
+  return fromEnv;
 }
 
 export function getMailPassword(stored?: StoredMailSettings | null) {
   const provider = getMailProviderName(stored);
   if (provider === "resend") {
-    return stored?.smtpPassword?.trim() || env("RESEND_API_KEY") || "";
+    const storedKey = stored?.smtpPassword?.trim() || "";
+    const envKey = env("RESEND_API_KEY") || "";
+    if (storedKey.startsWith("re_")) return storedKey;
+    if (envKey) return envKey;
+    return storedKey;
   }
   if (provider === "maropost") {
     return stored?.maropostApiKey?.trim() || stored?.smtpPassword?.trim() || env("MAROPOST_API_KEY") || env("SMTP_PASSWORD") || "";

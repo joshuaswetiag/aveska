@@ -12,6 +12,11 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function connectingMessage(provider: string, host: string | null, port: number) {
+  if (provider === "resend") return "Sending via Resend…";
+  return `Connecting to ${host}:${port}…`;
+}
+
 export async function sendCampaign(
   campaignId: string,
   options?: {
@@ -60,8 +65,8 @@ export async function sendCampaign(
       sample?.id || campaign.id,
       trackingBase ?? "",
     );
-    await options.onProgress?.(0, 1, `Connecting to ${config.host}:${config.port}…`);
     const transport = await getEmailTransport();
+    await options.onProgress?.(0, 1, connectingMessage(config.provider, config.host, config.port));
     await transport.send({
       to: options.testTo,
       subject: `[TEST] ${sample?.subject || campaign.subject || campaign.name}`,
@@ -99,8 +104,8 @@ export async function sendCampaign(
   }
 
   await prisma.campaign.update({ where: { id: campaignId }, data: { status: "SENDING" } });
-  await options?.onProgress?.(0, candidates.length, `Connecting to ${config.host}:${config.port}…`);
   const transport = await getEmailTransport();
+  await options?.onProgress?.(0, candidates.length, connectingMessage(config.provider, config.host, config.port));
   const from = formatFromHeader(config);
   let sent = 0;
   let failed = 0;

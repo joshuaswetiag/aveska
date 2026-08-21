@@ -28,7 +28,15 @@ export type MailFormValues = {
   maropostCampaignName: string;
 };
 
-export function MailSettingsForm({ mail, canEdit }: { mail: MailFormValues; canEdit: boolean }) {
+export function MailSettingsForm({
+  mail,
+  canEdit,
+  hostedOnRailway = false,
+}: {
+  mail: MailFormValues;
+  canEdit: boolean;
+  hostedOnRailway?: boolean;
+}) {
   const [pending, setPending] = useState(false);
   const [provider, setProvider] = useState(mail.emailProvider);
   const [secure, setSecure] = useState(mail.smtpSecure);
@@ -103,6 +111,13 @@ export function MailSettingsForm({ mail, canEdit }: { mail: MailFormValues; canE
             <Badge variant={mail.configured ? "success" : "warning"}>{mail.configured ? "Details saved" : "Not configured"}</Badge>
             {mail.configured ? <span className="text-muted-foreground">{mail.from}{mail.hostLabel ? ` · ${mail.hostLabel}` : ""}</span> : null}
           </div>
+          {hostedOnRailway ? (
+            <div className="md:col-span-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+              This Railway Hobby service cannot send Gmail SMTP (ports 25, 465, 587 are blocked). Choose{" "}
+              <strong>Resend</strong>, set From to an @aveska.com.au address, paste a Resend API key, then Test
+              connection. SMTP only works here after upgrading to Railway Pro.
+            </div>
+          ) : null}
           <div>
             <Label htmlFor="emailProvider">Provider</Label>
             <select
@@ -201,9 +216,8 @@ export function MailSettingsForm({ mail, canEdit }: { mail: MailFormValues; canE
             </>
           ) : null}
           <p className="text-xs text-muted-foreground md:col-span-2">
-            Railway Hobby cannot open Gmail SMTP (port 587). Use Resend over HTTPS: create an API key at resend.com,
-            verify aveska.com.au, and send from an address such as hello@aveska.com.au — not a Gmail address.
-            Gmail SMTP only works from this PC or after upgrading Railway to Pro.
+            SMTP/Gmail works for testing on this PC at http://localhost:3000. It cannot work on the Railway site
+            (Hobby blocks ports 25/465/587). For worldwide sends, switch this form to Resend.
           </p>
           <div className="flex flex-wrap gap-2 md:col-span-2">
             <Button type="submit" disabled={pending}>

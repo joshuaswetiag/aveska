@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { SettingsForm } from "@/components/settings-form";
 import { MailSettingsForm } from "@/components/mail-settings-form";
-import { formatFromHeader, getMailConfig } from "@/lib/email/config";
+import { formatFromHeader, getMailConfig, runningOnRailway } from "@/lib/email/config";
 import { loadMailSettings } from "@/lib/email/settings-store";
 import { loadTrackingUrl } from "@/lib/email/tracking-record";
 import { auth } from "@/auth";
@@ -23,6 +23,7 @@ export default async function SettingsPage() {
       </p>
       <MailSettingsForm
         canEdit={canEdit}
+        hostedOnRailway={runningOnRailway()}
         mail={{
           configured: mail.configured,
           provider: mail.provider,

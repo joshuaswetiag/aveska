@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getMailConfig, mailConfigGaps, parseMailProvider } from "@/lib/email/config";
+import { getMailConfig, getMailPassword, getMailProviderName, mailConfigGaps, parseMailProvider } from "@/lib/email/config";
+import { railwaySmtpBlockedMessage } from "@/lib/email/smtp";
 
 describe("mail provider config", () => {
   it("treats resend as configured with from-address and API key only", () => {
@@ -20,5 +21,41 @@ describe("mail provider config", () => {
     expect(parseMailProvider("Resend")).toBe("resend");
     expect(parseMailProvider("smtp")).toBe("smtp");
     expect(parseMailProvider("nope")).toBe("export");
+  });
+
+  it("tells Railway Hobby users to switch to Resend instead of waiting on SMTP", () => {
+    expect(railwaySmtpBlockedMessage("smtp.gmail.com:587")).toContain("Provider to Resend");
+    expect(railwaySmtpBlockedMessage()).toContain("@aveska.com.au");
+  });
+
+  it("on Railway, EMAIL_PROVIDER=resend wins over saved SMTP", () => {
+    const previousEnv = process.env.RAILWAY_ENVIRONMENT;
+    const previousProvider = process.env.EMAIL_PROVIDER;
+    process.env.RAILWAY_ENVIRONMENT = "production";
+    process.env.EMAIL_PROVIDER = "resend";
+    try {
+      expect(getMailProviderName({ emailProvider: "smtp" })).toBe("resend");
+    } finally {
+      if (previousEnv == null) delete process.env.RAILWAY_ENVIRONMENT;
+      else process.env.RAILWAY_ENVIRONMENT = previousEnv;
+      if (previousProvider == null) delete process.env.EMAIL_PROVIDER;
+      else process.env.EMAIL_PROVIDER = previousProvider;
+    }
+  });
+
+  it("does not use a leftover Gmail password as the Resend API key", () => {
+    const previous = process.env.RESEND_API_KEY;
+    process.env.RESEND_API_KEY = "re_from_env";
+    try {
+      expect(
+        getMailPassword({
+          emailProvider: "resend",
+          smtpPassword: "gmail-app-password",
+        }),
+      ).toBe("re_from_env");
+    } finally {
+      if (previous == null) delete process.env.RESEND_API_KEY;
+      else process.env.RESEND_API_KEY = previous;
+    }
   });
 });

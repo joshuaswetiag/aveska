@@ -11,6 +11,7 @@ import {
   getMailPassword,
   getMailProviderName,
   mailConfigGaps,
+  runningOnRailway,
   type StoredMailSettings,
 } from "@/lib/email/config";
 
@@ -39,9 +40,21 @@ export function explainSmtpError(host: string | null, port: number, error: unkno
     lower.includes("econnrefused") ||
     lower.includes("ehostunreach")
   ) {
-    return `Could not reach ${target}. Gmail SMTP is blocked on Railway Hobby/Trial (ports 25, 465, 587). Switch the provider to Resend (HTTPS) with an @aveska.com.au from-address, or upgrade to Railway Pro. (${detail})`;
+    return railwaySmtpBlockedMessage(target, detail);
   }
   return `Could not send via ${target}: ${detail}`;
+}
+
+export function railwaySmtpBlockedMessage(target = "smtp.gmail.com:587", detail?: string) {
+  const extra = detail ? ` (${detail})` : "";
+  return `Could not reach ${target}. Gmail SMTP is blocked on Railway Hobby/Trial (ports 25, 465, 587). In Settings, set Provider to Resend, from-address to an @aveska.com.au mailbox, and paste a Resend API key. Do not use Gmail as the from-address.${extra}`;
+}
+
+function assertSmtpAllowedOnThisHost(stored: StoredMailSettings | null) {
+  const config = getMailConfig(stored);
+  if (!runningOnRailway()) return;
+  if (config.provider !== "smtp" && config.provider !== "maropost") return;
+  throw new Error(railwaySmtpBlockedMessage(`${config.host ?? "smtp"}:${config.port}`));
 }
 
 setDefaultResultOrder("ipv4first");
@@ -164,7 +177,10 @@ export async function getEmailTransport(): Promise<EmailProvider> {
   const stored = await loadStoredMail();
   const provider = getMailProviderName(stored);
   if (provider === "resend") return new ResendEmailProvider(stored);
-  if (provider === "smtp" || provider === "maropost") return new SmtpEmailProvider(stored);
+  if (provider === "smtp" || provider === "maropost") {
+    assertSmtpAllowedOnThisHost(stored);
+    return new SmtpEmailProvider(stored);
+  }
   return disabledProvider;
 }
 
@@ -177,6 +193,7 @@ export async function verifyMailTransport(stored?: StoredMailSettings | null) {
   if (config.provider === "resend") {
     return verifyResend(settings);
   }
+  assertSmtpAllowedOnThisHost(settings);
   try {
     await nodemailer.createTransport(await smtpOptions(settings)).verify();
   } catch (error) {
