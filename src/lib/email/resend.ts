@@ -21,7 +21,7 @@ function assertResendFrom(fromEmail: string | null) {
   const value = (fromEmail ?? "").toLowerCase();
   if (value.endsWith("@gmail.com") || value.endsWith("@googlemail.com")) {
     throw new Error(
-      "Resend cannot send from a Gmail address. Use an address on a domain you verified in Resend, such as hello@aveska.com.au.",
+      "Resend cannot send from a Gmail address. Use an address on the domain you verified in Resend, such as hello@domainemarket.com.",
     );
   }
 }

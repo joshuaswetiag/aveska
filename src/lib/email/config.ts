@@ -49,6 +49,27 @@ function text(stored: string | null | undefined, envName: string) {
   return value || env(envName);
 }
 
+function isGmailAddress(email: string | null) {
+  const value = (email ?? "").toLowerCase();
+  return value.endsWith("@gmail.com") || value.endsWith("@googlemail.com");
+}
+
+function pickFromEmail(
+  stored?: StoredMailSettings | null,
+  overrides?: { fromEmail?: string | null },
+) {
+  const provider = getMailProviderName(stored);
+  const override = normalizeEmail(overrides?.fromEmail);
+  const storedEmail = normalizeEmail(stored?.fromEmail);
+  const envEmail = normalizeEmail(env("SMTP_FROM"));
+  if (provider === "resend") {
+    if (override && !isGmailAddress(override)) return override;
+    if (storedEmail && !isGmailAddress(storedEmail)) return storedEmail;
+    return envEmail || storedEmail || override;
+  }
+  return override ?? storedEmail ?? envEmail;
+}
+
 export function parseMailProvider(raw: string | null | undefined): MailProviderName {
   const value = (raw ?? "export").trim().toLowerCase();
   if (value === "smtp" || value === "maropost" || value === "resend") return value;
@@ -92,7 +113,7 @@ export function getMailConfig(
   const port = resend ? 443 : Number(stored?.smtpPort || env("SMTP_PORT") || (maropost ? "587" : "587")) || 587;
   const secure = resend ? true : stored?.smtpSecure ?? ((env("SMTP_SECURE") ?? "false").toLowerCase() === "true" || port === 465);
   const user = text(stored?.smtpUser, "SMTP_USER") ?? (maropost ? "apikey" : null);
-  const fromEmail = normalizeEmail(overrides?.fromEmail) ?? normalizeEmail(stored?.fromEmail) ?? normalizeEmail(env("SMTP_FROM"));
+  const fromEmail = pickFromEmail(stored, overrides);
   const fromName = overrides?.fromName?.trim() || stored?.fromName?.trim() || env("SMTP_FROM_NAME") || "Aveska";
   const replyTo = normalizeEmail(overrides?.replyTo) ?? normalizeEmail(stored?.replyTo) ?? normalizeEmail(env("SMTP_REPLY_TO"));
   const password = getMailPassword(stored);

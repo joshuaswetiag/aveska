@@ -12,9 +12,16 @@ describe("mail provider config", () => {
     expect(config.provider).toBe("resend");
     expect(config.configured).toBe(true);
     expect(config.host).toBe("api.resend.com");
-    expect(mailConfigGaps({ emailProvider: "resend", fromEmail: "hello@aveska.com.au" }).missing).toContain(
-      "Resend API key",
-    );
+    const previousKey = process.env.RESEND_API_KEY;
+    delete process.env.RESEND_API_KEY;
+    try {
+      expect(mailConfigGaps({ emailProvider: "resend", fromEmail: "hello@aveska.com.au" }).missing).toContain(
+        "Resend API key",
+      );
+    } finally {
+      if (previousKey == null) delete process.env.RESEND_API_KEY;
+      else process.env.RESEND_API_KEY = previousKey;
+    }
   });
 
   it("parses resend from EMAIL_PROVIDER-style strings", () => {
@@ -25,7 +32,7 @@ describe("mail provider config", () => {
 
   it("tells Railway Hobby users to switch to Resend instead of waiting on SMTP", () => {
     expect(railwaySmtpBlockedMessage("smtp.gmail.com:587")).toContain("Provider to Resend");
-    expect(railwaySmtpBlockedMessage()).toContain("@aveska.com.au");
+    expect(railwaySmtpBlockedMessage()).toContain("verified Resend domain");
   });
 
   it("on Railway, EMAIL_PROVIDER=resend wins over saved SMTP", () => {
@@ -56,6 +63,24 @@ describe("mail provider config", () => {
     } finally {
       if (previous == null) delete process.env.RESEND_API_KEY;
       else process.env.RESEND_API_KEY = previous;
+    }
+  });
+
+  it("keeps Resend from-name Aveska while using a verified test domain", () => {
+    const previous = process.env.SMTP_FROM;
+    process.env.SMTP_FROM = "hello@domainemarket.com";
+    try {
+      const config = getMailConfig({
+        emailProvider: "resend",
+        fromName: "Aveska",
+        fromEmail: "someone@gmail.com",
+        smtpPassword: "re_test",
+      });
+      expect(config.fromEmail).toBe("hello@domainemarket.com");
+      expect(config.fromName).toBe("Aveska");
+    } finally {
+      if (previous == null) delete process.env.SMTP_FROM;
+      else process.env.SMTP_FROM = previous;
     }
   });
 });

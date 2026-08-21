@@ -47,7 +47,7 @@ export function explainSmtpError(host: string | null, port: number, error: unkno
 
 export function railwaySmtpBlockedMessage(target = "smtp.gmail.com:587", detail?: string) {
   const extra = detail ? ` (${detail})` : "";
-  return `Could not reach ${target}. Gmail SMTP is blocked on Railway Hobby/Trial (ports 25, 465, 587). In Settings, set Provider to Resend, from-address to an @aveska.com.au mailbox, and paste a Resend API key. Do not use Gmail as the from-address.${extra}`;
+  return `Could not reach ${target}. Gmail SMTP is blocked on Railway Hobby/Trial (ports 25, 465, 587). In Settings, set Provider to Resend, from-address to a mailbox on your verified Resend domain, and paste a Resend API key. Do not use Gmail as the from-address.${extra}`;
 }
 
 function assertSmtpAllowedOnThisHost(stored: StoredMailSettings | null) {

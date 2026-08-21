@@ -114,8 +114,8 @@ export function MailSettingsForm({
           {hostedOnRailway ? (
             <div className="md:col-span-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
               This Railway Hobby service cannot send Gmail SMTP (ports 25, 465, 587 are blocked). Choose{" "}
-              <strong>Resend</strong>, set From to an @aveska.com.au address, paste a Resend API key, then Test
-              connection. SMTP only works here after upgrading to Railway Pro.
+              <strong>Resend</strong>, set From to an address on your verified Resend domain, paste a Resend API key,
+              then Test connection. SMTP only works here after upgrading to Railway Pro.
             </div>
           ) : null}
           <div>
@@ -142,7 +142,7 @@ export function MailSettingsForm({
           </div>
           <div>
             <Label htmlFor="fromEmail">From email</Label>
-            <Input id="fromEmail" name="fromEmail" type="email" defaultValue={mail.fromEmail} placeholder="hello@aveska.com.au" className="mt-1" />
+            <Input id="fromEmail" name="fromEmail" type="email" defaultValue={mail.fromEmail} placeholder="hello@your-verified-domain.com" className="mt-1" />
           </div>
           <div className="md:col-span-2">
             <Label htmlFor="replyTo">Reply-to</Label>
@@ -217,7 +217,8 @@ export function MailSettingsForm({
           ) : null}
           <p className="text-xs text-muted-foreground md:col-span-2">
             SMTP/Gmail works for testing on this PC at http://localhost:3000. It cannot work on the Railway site
-            (Hobby blocks ports 25/465/587). For worldwide sends, switch this form to Resend.
+            (Hobby blocks ports 25/465/587). For worldwide sends, switch this form to Resend and use a from-address
+            on a domain you verified there. The From name can still be Aveska.
           </p>
           <div className="flex flex-wrap gap-2 md:col-span-2">
             <Button type="submit" disabled={pending}>
