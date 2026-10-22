@@ -78,7 +78,7 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
     try {
       return JSON.parse(text) as BootstrapStatus & { error?: string };
     } catch {
-      throw new Error("The app returned an invalid response. Redeploy Railway and try again.");
+      throw new Error("The app returned an invalid response. Redeploy and try again.");
     }
   }
 

@@ -83,17 +83,16 @@ export function SettingsForm({ settings }: { settings: SettingsShape }) {
               id="trackingUrl"
               name="trackingUrl"
               defaultValue={settings.trackingUrl}
-              placeholder="https://aveska-production.up.railway.app"
+              placeholder="https://aveska.example.workers.dev"
               className="mt-1"
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              Use the Railway https URL (Generate Domain), for example
-              https://aveska-production.up.railway.app. New emails wrap product clicks through that host so they work
-              worldwide with this PC off. Do not paste a trycloudflare tunnel.
+              Use the Cloudflare https URL, for example https://aveska.example.workers.dev. New emails wrap product
+              clicks through that host so they work worldwide with this PC off. Do not paste a trycloudflare tunnel.
             </p>
             {isEphemeralTrackingOrigin(settings.trackingUrl) ? (
               <p className="mt-1 text-xs text-amber-700">
-                A tunnel is still saved ({settings.trackingUrl}). Replace it with the Railway URL and send a new email.
+                A tunnel is still saved ({settings.trackingUrl}). Replace it with the Cloudflare URL and send a new email.
                 Old tunnel links cannot be repaired.
               </p>
             ) : null}

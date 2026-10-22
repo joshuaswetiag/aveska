@@ -79,19 +79,34 @@ npm run build
 npm start
 ```
 
-## Deploy on Railway
+`npm run build` writes the Vite client to `dist/`. `npm start` serves that client and the API on one port.
 
-The app stays online 24/7 (no `track:tunnel` on your PC). You need a **GitHub repo** or the Railway CLI.
+## Deploy on Cloudflare
 
-1. In [Railway](https://railway.app), **New Project → Database → PostgreSQL**.
-2. **New → GitHub Repo** (or `railway up`) and deploy this app into the same project.
-3. On the app service **Variables**, add:
+The public site is the Vite app. Cloudflare cannot reach PostgreSQL on your PC, so production needs a hosted database (Neon, Supabase, or another public Postgres) attached with [Hyperdrive](https://developers.cloudflare.com/hyperdrive/).
+
+1. Create the hosted Postgres database and set `DATABASE_URL` to it. Apply the schema and seed once:
+
+```bash
+npx prisma migrate deploy
+npm run db:seed
+```
+
+2. Log in and create a Worker from this repo:
+
+```bash
+npx wrangler login
+```
+
+In the [Cloudflare dashboard](https://dash.cloudflare.com), create a Worker, connect [joshuaswetiag/aveska](https://github.com/joshuaswetiag/aveska), and attach Hyperdrive to that database. Build command: `npm run build`. The static client is `dist/`.
+
+3. Set these secrets to the Worker or custom-domain `https` URL:
 
 ```text
-DATABASE_URL=${{Postgres.DATABASE_URL}}
+DATABASE_URL=<hosted Postgres URL, via Hyperdrive>
 AUTH_SECRET=<long random string>
-AUTH_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
-TRACKING_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
+AUTH_URL=https://<your-worker-or-domain>
+TRACKING_URL=https://<your-worker-or-domain>
 EMAIL_PROVIDER=resend
 RESEND_API_KEY=re_your_key
 SMTP_FROM=hello@aveska.com.au
@@ -103,20 +118,12 @@ NETO_API_KEY=<from local .env>
 NETO_API_USERNAME=<from local .env>
 ```
 
-Rename `Postgres` in `DATABASE_URL` if your database service has a different name.
+4. Put uploaded import files in [R2](https://developers.cloudflare.com/r2/). Run background jobs with a [Cron Trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/). The local server writes uploads to disk and polls jobs in-process; Workers cannot do either.
+5. Sign in and set **Settings → Public app URL** to that same `https` URL before sending campaigns. Click tracking uses that host. Do not use a trycloudflare tunnel — those hostnames die when they restart, and links already sent cannot be repaired.
 
-4. **Settings → Networking → Generate Domain**. Redeploy once `AUTH_URL` can resolve.
-5. Migrations run automatically (`npx prisma migrate deploy` before each start). Seed once from Railway **Settings → one-off command**:
+Do not commit `.env`. Use Resend for mail. SMTP ports are blocked from Workers, so Gmail SMTP stays a local-only option.
 
-```bash
-npx tsx prisma/seed.ts
-```
-
-6. Sign in, set **Settings → Public app URL** to that same Railway https URL, then send campaigns. Click tracking
-   works worldwide while Railway is running, with your PC off. Do not use a trycloudflare tunnel — those hostnames die
-   when they restart and cannot be repaired in already-sent emails.
-
-Do not commit `.env`. Railway Hobby cannot send Gmail SMTP; use Resend (HTTPS) as above, or upgrade to Pro.
+The Worker entry (Hyperdrive, R2, and Cron) is not wired in this repo yet. Connecting the GitHub repo publishes the Vite client. API routes, jobs, and uploads still run with `npm start` until that Worker adapter lands.
 
 ## Importing orders
 

@@ -113,9 +113,8 @@ export function MailSettingsForm({
           </div>
           {hostedOnRailway ? (
             <div className="md:col-span-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-              This Railway Hobby service cannot send Gmail SMTP (ports 25, 465, 587 are blocked). Choose{" "}
-              <strong>Resend</strong>, set From to an address on your verified Resend domain, paste a Resend API key,
-              then Test connection. SMTP only works here after upgrading to Railway Pro.
+              This host cannot send Gmail SMTP (ports 25, 465, 587 are blocked). Choose <strong>Resend</strong>, set
+              From to an address on your verified Resend domain, paste a Resend API key, then Test connection.
             </div>
           ) : null}
           <div>
@@ -127,8 +126,8 @@ export function MailSettingsForm({
               onChange={(e) => setProvider(e.target.value as MailFormValues["emailProvider"])}
             >
               <option value="export">Off — export only</option>
-              <option value="resend">Resend (HTTPS — works on Railway Hobby)</option>
-              <option value="smtp">SMTP (Gmail — Railway Pro only)</option>
+              <option value="resend">Resend (HTTPS — use this on Cloudflare)</option>
+              <option value="smtp">SMTP (Gmail — this PC only)</option>
               <option value="maropost">Maropost SMTP</option>
             </select>
           </div>
@@ -216,9 +215,9 @@ export function MailSettingsForm({
             </>
           ) : null}
           <p className="text-xs text-muted-foreground md:col-span-2">
-            SMTP/Gmail works for testing on this PC at http://localhost:3000. It cannot work on the Railway site
-            (Hobby blocks ports 25/465/587). For worldwide sends, switch this form to Resend and use a from-address
-            on a domain you verified there. The From name can still be Aveska.
+            SMTP/Gmail works for testing on this PC at http://localhost:3000. Cloudflare Workers block SMTP ports
+            25/465/587. For worldwide sends, switch this form to Resend and use a from-address on a domain you verified
+            there. The From name can still be Aveska.
           </p>
           <div className="flex flex-wrap gap-2 md:col-span-2">
             <Button type="submit" disabled={pending}>

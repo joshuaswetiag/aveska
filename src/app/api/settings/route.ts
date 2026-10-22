@@ -14,13 +14,13 @@ export async function POST(request: Request) {
     typeof body.trackingUrl === "string" && body.trackingUrl.trim() ? body.trackingUrl.trim().replace(/\/$/, "") : null;
   if (trackingUrl && isEphemeralTrackingOrigin(trackingUrl)) {
     return NextResponse.json(
-      { error: "Cloudflare tunnel URLs die when they restart. Use the Railway https URL so clicks work worldwide." },
+      { error: "Cloudflare tunnel URLs die when they restart. Use the Cloudflare Worker https URL so clicks work worldwide." },
       { status: 400 },
     );
   }
   if (trackingUrl && !isStableTrackingOrigin(trackingUrl) && !isLocalTrackingOrigin(trackingUrl)) {
     return NextResponse.json(
-      { error: "Use an https URL like https://aveska-production.up.railway.app" },
+      { error: "Use an https URL like https://aveska.example.workers.dev" },
       { status: 400 },
     );
   }

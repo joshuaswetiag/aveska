@@ -46,7 +46,7 @@ export async function sendCampaign(
   const trackingBase = await resolveTrackingBaseUrl();
   if (process.env.NODE_ENV === "production" && !isStableTrackingOrigin(trackingBase)) {
     throw new Error(
-      "Set AUTH_URL and TRACKING_URL to the Railway https domain (Generate Domain) so click tracking works worldwide.",
+      "Set AUTH_URL and TRACKING_URL to the Cloudflare https URL so click tracking works worldwide.",
     );
   }
 
