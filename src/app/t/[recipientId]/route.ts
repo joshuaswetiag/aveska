@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/server/next-response";
 import { isAllowedTrackingDestination, recordCampaignTraffic } from "@/lib/email/tracking-record";
 
 export async function GET(request: Request, { params }: { params: Promise<{ recipientId: string }> }) {

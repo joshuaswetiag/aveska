@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/server/next-response";
 import { auth } from "@/auth";
 import { verifyMailTransport } from "@/lib/email/smtp";
 import { loadMailSettings } from "@/lib/email/settings-store";

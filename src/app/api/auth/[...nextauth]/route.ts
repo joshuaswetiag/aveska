@@ -1,3 +1,7 @@
-import { handlers } from "@/auth";
+export function GET() {
+  return new Response(null, { status: 404 });
+}
 
-export const { GET, POST } = handlers;
+export function POST() {
+  return GET();
+}

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/server/next-response";
 import { auth } from "@/auth";
 import { audit } from "@/lib/audit";
 import { EMPTY_MAIL_SETTINGS, parseMailProvider } from "@/lib/email/config";

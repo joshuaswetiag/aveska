@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/server/next-response";
 import { auth } from "@/auth";
 import { generateCampaign } from "@/lib/campaign/generate";
 import { enqueueJob } from "@/lib/jobs/queue";

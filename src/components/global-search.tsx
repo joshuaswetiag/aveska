@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import { Link } from "@/lib/router";
 
 type SearchResult = {
   customers: Array<{ id: string; name: string; email: string | null }>;

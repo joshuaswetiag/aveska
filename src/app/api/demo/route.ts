@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/server/next-response";
 import { auth } from "@/auth";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { runJobInBackground } from "@/lib/jobs/run-in-background";

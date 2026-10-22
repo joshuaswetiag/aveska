@@ -1,7 +1,4 @@
-"use client";
-
 import { useState } from "react";
-import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 
@@ -12,17 +9,20 @@ export default function LoginPage() {
   async function onSubmit(formData: FormData) {
     setPending(true);
     setError("");
-    const result = await signIn("credentials", {
-      email: String(formData.get("email") ?? ""),
-      password: String(formData.get("password") ?? ""),
-      redirect: false,
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: String(formData.get("email") ?? ""),
+        password: String(formData.get("password") ?? ""),
+      }),
     });
     setPending(false);
-    if (result?.error) {
+    if (!res.ok) {
       setError("Invalid email or password");
       return;
     }
-    window.location.href = "/";
+    window.location.assign("/");
   }
 
   return (

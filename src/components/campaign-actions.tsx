@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/router";
 
 type SendSummary = {
   configured: boolean;

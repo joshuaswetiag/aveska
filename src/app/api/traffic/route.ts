@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "@/server/next-response";
 import { auth } from "@/auth";
 import { clearAllTraffic, deleteTrafficEvent } from "@/lib/email/tracking-record";
 

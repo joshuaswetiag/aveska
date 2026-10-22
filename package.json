@@ -6,9 +6,9 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "prisma generate && next build",
-    "start": "next start --hostname 0.0.0.0",
+    "dev": "tsx src/server/main.ts",
+    "build": "prisma generate && vite build",
+    "start": "tsx src/server/main.ts --prod",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -56,21 +56,23 @@
     "next-auth": "^5.0.0-beta.32",
     "next-themes": "^0.4.6",
     "nodemailer": "^8.0.11",
-    "prisma": "6.19.3",
     "papaparse": "^5.6.0",
+    "prisma": "6.19.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "react-router-dom": "^7.18.4",
     "recharts": "^3.10.1",
     "server-only": "^0.0.1",
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.6.0",
+    "tsx": "^4.23.12",
     "vaul": "^1.1.2",
     "xlsx": "^0.18.5",
-    "zod": "^4.4.3",
-    "tsx": "^4.23.12"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/bcryptjs": "^3.0.0",
     "@types/node": "^20",
     "@types/nodemailer": "^8.0.1",
@@ -78,10 +80,12 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/xlsx": "^0.0.36",
+    "@vitejs/plugin-react": "^6.1.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.1",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "vite": "^8.3.5",
     "vitest": "^4.1.10"
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/router";
 
 export function JobPoller({ id, status }: { id: string; status: string }) {
   const router = useRouter();

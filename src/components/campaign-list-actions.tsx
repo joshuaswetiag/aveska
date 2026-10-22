@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/router";
 import { useState } from "react";
 
 export function CampaignListActions({ id, name }: { id: string; name: string }) {
