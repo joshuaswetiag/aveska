@@ -94,6 +94,7 @@ async function loop() {
 }
 
 export function startJobWorker() {
+  if (process.env.AVESKA_RUNTIME === "worker") return;
   if (globalThis.aveskaJobWorkerStarted) return;
   globalThis.aveskaJobWorkerStarted = true;
   console.log("Aveska in-process job worker started");

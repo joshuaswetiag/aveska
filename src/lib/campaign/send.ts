@@ -111,7 +111,9 @@ export async function sendCampaign(
   const from = formatFromHeader(config);
   let sent = 0;
   let failed = 0;
+  let paused = false;
   const errors: string[] = [];
+  const startedAt = Date.now();
 
   let remaining = candidates.length;
   try {
@@ -129,8 +131,32 @@ export async function sendCampaign(
         failed += 1;
         continue;
       }
+      const current = await prisma.campaignRecipient.findUnique({
+        where: { id: recipient.id },
+        select: { sent: true, sendError: true },
+      });
+      if (!current || current.sent) continue;
+      if (current.sendError?.startsWith("CLAIM:")) {
+        const at = Number(current.sendError.slice(6));
+        if (Number.isFinite(at) && Date.now() - at < 90_000) continue;
+      }
+      const claim = await prisma.campaignRecipient.updateMany({
+        where: { id: recipient.id, sent: false, sendError: current.sendError },
+        data: { sendError: `CLAIM:${Date.now()}` },
+      });
+      if (claim.count === 0) continue;
+      const listUnsubscribe = trackingBase
+        ? `${trackingBase.replace(/\/$/, "")}/t/${encodeURIComponent(recipient.id)}/unsubscribe`
+        : undefined;
       try {
-        const result = await transport.send({ to, subject, html, from });
+        const result = await transport.send({
+          to,
+          subject,
+          html,
+          from,
+          idempotencyKey: `aveska-${recipient.id}`,
+          listUnsubscribe,
+        });
         await prisma.campaignRecipient.update({
           where: { id: recipient.id },
           data: { sent: true, sentAt: new Date(), sendError: null, providerMessageId: result.id, delivered: true },
@@ -146,16 +172,31 @@ export async function sendCampaign(
         });
       }
       if (config.delayMs) await sleep(config.delayMs);
+      const onWorker = process.env.AVESKA_RUNTIME === "worker";
+      if (onWorker && Date.now() - startedAt > 20_000 && index < candidates.length - 1) {
+        paused = true;
+        break;
+      }
     }
   } finally {
-    remaining = await prisma.campaignRecipient.count({ where: { campaignId, sent: false } });
+    remaining = await prisma.campaignRecipient.count({
+      where: {
+        campaignId,
+        sent: false,
+        customer: {
+          isSuppressed: false,
+          NOT: { emailNormalized: { endsWith: "@members.ebay.com" } },
+        },
+        OR: [{ sendError: null }, { sendError: { startsWith: "CLAIM:" } }],
+      },
+    });
     const sentCount = await prisma.campaignRecipient.count({ where: { campaignId, sent: true } });
     await prisma.campaign.update({
       where: { id: campaignId },
       data: {
         sent: sentCount,
         sentAt: sentCount > 0 ? new Date() : campaign.sentAt,
-        status: sentCount > 0 ? "SENT" : campaign.status === "EXPORTED" ? "EXPORTED" : "APPROVED",
+        status: paused ? "SENDING" : sentCount > 0 ? "SENT" : campaign.status === "EXPORTED" ? "EXPORTED" : "APPROVED",
       },
     });
   }
@@ -164,5 +205,5 @@ export async function sendCampaign(
   if (sent === 0 && failed > 0) {
     throw new Error(errors[0] || "All emails failed to send.");
   }
-  return { test: false, campaignId, sent, failed, skipped: recipients.length - candidates.length, remaining };
+  return { test: false, campaignId, sent, failed, skipped: recipients.length - candidates.length, remaining, paused };
 }

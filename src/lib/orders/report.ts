@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { canonicalVehicleName } from "@/lib/vehicle/extract";
-import { formatDate, parseNumber, zonedDayRange } from "@/lib/utils";
+import { formatDate, likeTerm, parseNumber, zonedDayRange } from "@/lib/utils";
 import type { VehicleExtraction } from "@/types";
 import type { Prisma } from "@prisma/client";
 
@@ -54,7 +54,7 @@ export function orderReportOrderWhere(filters: Pick<OrderReportFilters, "from" |
     });
   }
   if (filters.q) {
-    const q = filters.q;
+    const q = likeTerm(filters.q);
     clauses.push({
       OR: [
         { externalId: { contains: q } },
@@ -98,7 +98,7 @@ export function orderItemReportWhere(filters: Pick<OrderReportFilters, "from" | 
     });
   }
   if (filters.q) {
-    const q = filters.q;
+    const q = likeTerm(filters.q);
     clauses.push({
       OR: [
         { productName: { contains: q } },

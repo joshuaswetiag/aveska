@@ -8,6 +8,7 @@ import { audit } from "@/lib/audit";
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (session.user.role === "READONLY") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
   const campaign = await prisma.campaign.findUnique({
     where: { id },
@@ -19,7 +20,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (!campaign) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const rows = campaign.recipients.map((recipient) => {
-    const recProduct = campaign.products[0]?.product;
+    const personalized = recipient.personalized as { products?: Array<{ name?: string; url?: string }> } | null;
+    const own = personalized?.products?.[0];
+    const recProduct = own ? { name: own.name, url: own.url } : campaign.products.find((row) => row.recommendation?.customerId === recipient.customerId)?.product ?? campaign.products[0]?.product;
     return {
       "Customer Name": recipient.customer.name,
       Email: recipient.customer.email ?? "",
@@ -38,7 +41,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     .filter((r) => r.customer.email)
     .map((r) => ({ Email: r.customer.email, Name: r.customer.name, Vehicle: r.vehicleLabel }));
 
-  await prisma.campaign.update({ where: { id }, data: { exportedAt: new Date(), status: campaign.status === "APPROVED" ? "EXPORTED" : campaign.status } });
+  await prisma.campaign.update({ where: { id }, data: { exportedAt: new Date() } });
   await audit({ userId: session.user.id, action: "campaign_export", entityType: "Campaign", entityId: id });
 
   const format = new URL(request.url).searchParams.get("format") ?? "csv";

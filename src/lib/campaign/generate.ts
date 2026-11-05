@@ -4,6 +4,7 @@ import { asStringArray } from "@/lib/json-array";
 import { formatCurrency, slugify, withUtm, zonedDayRange, STORE_TIMEZONE } from "@/lib/utils";
 import { loadStockProducts, matchStockForVehicle, vehicleCacheKey, vehicleFromOrderItem } from "@/lib/campaign/match-stock";
 import { resolveProductLink, isStoreHome } from "@/lib/catalogue/product-url";
+import { isEbayMemberEmail } from "@/lib/campaign/send-targets";
 import type { CampaignType } from "@prisma/client";
 import type { FitmentProfile } from "@/types";
 
@@ -166,17 +167,26 @@ async function generateFromOrderRange(
   }
 
   const customerIds = [...byCustomer.keys()];
-  const purchases = customerIds.length
-    ? await prisma.orderItem.findMany({
-        where: { order: { customerId: { in: customerIds } } },
+  const purchases: Array<{
+    sku: string | null;
+    productId: string | null;
+    category: string | null;
+    order: { customerId: string; orderDate: Date | null };
+  }> = [];
+  for (let index = 0; index < customerIds.length; index += 90) {
+    const chunk = customerIds.slice(index, index + 90);
+    purchases.push(
+      ...(await prisma.orderItem.findMany({
+        where: { order: { customerId: { in: chunk } } },
         select: {
           sku: true,
           productId: true,
           category: true,
           order: { select: { customerId: true, orderDate: true } },
         },
-      })
-    : [];
+      })),
+    );
+  }
   const purchasedByCustomer = new Map<string, { ids: Set<string>; skus: Array<{ sku: string; purchasedAt?: Date | null }>; types: string[] }>();
   for (const row of purchases) {
     const current = purchasedByCustomer.get(row.order.customerId) ?? { ids: new Set<string>(), skus: [], types: [] };
@@ -214,6 +224,11 @@ async function generateFromOrderRange(
       .filter((product) => !purchased.ids.has(product.productId))
       .filter((product) => !purchased.skus.some((sku) => sku.sku.toLowerCase() === (product.sku ?? "").toLowerCase()))
       .slice(0, 3);
+    if (isEbayMemberEmail(group.customer.emailNormalized)) {
+      skippedNoEmail += 1;
+      done += 1;
+      continue;
+    }
     if (!products.length) {
       skippedNoStock += 1;
       done += 1;
@@ -360,6 +375,7 @@ async function generateFromRecommendations(
 
   for (const [customerId, recs] of byCustomer) {
     const customer = recs[0].customer;
+    if (isEbayMemberEmail(customer.emailNormalized)) continue;
     const vehicle = recs[0].vehicle;
     const lastItem = await prisma.orderItem.findFirst({
       where: { order: { customerId } },

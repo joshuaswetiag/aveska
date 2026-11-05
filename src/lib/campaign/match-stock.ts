@@ -157,7 +157,18 @@ export function matchStockForVehicle(
     }
     if (productMakes.size && !productMakes.has(make)) continue;
 
-    const negative = product.overrides.some((o) => !o.isCompatible) || product.fitments.some((f) => f.isNegative);
+    const negative =
+      product.fitments.some(
+        (f) => f.isNegative && f.vehicle.make.toLowerCase() === make && (profile.series.length === 0 || asStringArray(f.vehicle.series).some((code) => profile.series.includes(code))),
+      ) ||
+      product.overrides.some((o) => {
+        if (o.isCompatible) return false;
+        const series = asStringArray(o.series);
+        if (!o.make && !series.length) return true;
+        if (o.make && o.make.toLowerCase() !== make) return false;
+        if (series.length && !series.some((code) => profile.series.includes(code))) return false;
+        return true;
+      });
     const positiveOverride = product.overrides.some((o) => {
       const series = asStringArray(o.series);
       return (

@@ -10,6 +10,7 @@ export const maxDuration = 800;
 export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (session.user.role === "READONLY") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
   const job = await prisma.job.findUnique({ where: { id } });
   if (!job) return NextResponse.json({ error: "Not found" }, { status: 404 });

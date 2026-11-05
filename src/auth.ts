@@ -16,7 +16,12 @@ export type SessionUser = {
 };
 
 function secret() {
-  return process.env.AUTH_SECRET || "dev-only-change-this-to-a-long-random-string";
+  const value = process.env.AUTH_SECRET?.trim();
+  if (value && value !== "dev-only-change-this-to-a-long-random-string") return value;
+  if (process.env.NODE_ENV === "production" || process.env.AVESKA_RUNTIME === "worker") {
+    throw new Error("AUTH_SECRET is not set");
+  }
+  return "dev-only-change-this-to-a-long-random-string";
 }
 
 function encode(user: SessionUser) {
@@ -71,15 +76,26 @@ export async function requireRole(roles: Role[]) {
   return session;
 }
 
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+
 export async function login(request: Request) {
   const body = (await request.json().catch(() => ({}))) as { email?: string; password?: string };
   const email = String(body.email ?? "").trim().toLowerCase();
   const password = String(body.password ?? "");
   if (!email || !password) return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
+  const now = Date.now();
+  const attempt = loginAttempts.get(email);
+  if (attempt && attempt.resetAt > now && attempt.count >= 8) {
+    return NextResponse.json({ error: "Too many login attempts. Try again in a few minutes." }, { status: 429 });
+  }
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user || !(await compare(password, user.passwordHash))) {
+    const current = loginAttempts.get(email);
+    const resetAt = current && current.resetAt > now ? current.resetAt : now + 10 * 60 * 1000;
+    loginAttempts.set(email, { count: (current && current.resetAt > now ? current.count : 0) + 1, resetAt });
     return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
   }
+  loginAttempts.delete(email);
   const response = NextResponse.json({ ok: true });
   response.headers.append("set-cookie", cookie(encode({ id: user.id, email: user.email, name: user.name, role: user.role }), MAX_AGE));
   return response;

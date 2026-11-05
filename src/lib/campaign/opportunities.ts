@@ -52,10 +52,11 @@ export async function getCrossSellOpportunities(limit = 80): Promise<Opportunity
     if (!hasVehicleSignal(extracted)) continue;
     const name = (extracted?.application ?? "").trim() || "Unknown vehicle";
     const make = (extracted?.make ?? "").trim() || null;
-    let group = groups.get(name);
+    const key = `${make ?? ""}|${name}`;
+    let group = groups.get(key);
     if (!group) {
       group = { make, customers: new Set(), eligible: new Set(), orderLines: 0 };
-      groups.set(name, group);
+      groups.set(key, group);
     }
     group.orderLines += 1;
     const customerId = item.order.customerId;
@@ -65,8 +66,8 @@ export async function getCrossSellOpportunities(limit = 80): Promise<Opportunity
   }
 
   const rows = [...groups.entries()]
-    .map(([name, group]) => ({
-      name,
+    .map(([key, group]) => ({
+      name: key.slice(key.indexOf("|") + 1),
       make: group.make,
       customers: group.customers.size,
       eligible: group.eligible.size,

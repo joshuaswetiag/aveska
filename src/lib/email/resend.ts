@@ -57,7 +57,14 @@ export class ResendEmailProvider implements EmailProvider {
 
   constructor(private stored: StoredMailSettings | null = null) {}
 
-  async send(payload: { to: string; subject: string; html: string; from?: string }): Promise<{ id: string }> {
+  async send(payload: {
+    to: string;
+    subject: string;
+    html: string;
+    from?: string;
+    idempotencyKey?: string;
+    listUnsubscribe?: string;
+  }): Promise<{ id: string }> {
     const config = getMailConfig(this.stored);
     const apiKey = getMailPassword(this.stored);
     if (!apiKey) throw new Error("Missing Resend API key.");
@@ -66,6 +73,10 @@ export class ResendEmailProvider implements EmailProvider {
     const logo = outbound.attachments[0];
     const result = await resendRequest(apiKey, "/emails", {
       method: "POST",
+      headers: {
+        ...(payload.idempotencyKey ? { "Idempotency-Key": payload.idempotencyKey } : {}),
+        ...(payload.listUnsubscribe ? { "List-Unsubscribe": `<${payload.listUnsubscribe}>` } : {}),
+      },
       body: JSON.stringify({
         from: payload.from || formatFromHeader(config),
         to: [payload.to],

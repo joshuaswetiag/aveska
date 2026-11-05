@@ -55,7 +55,7 @@ async function writeResponse(res: ServerResponse, response: Response) {
 function serveStatic(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", "http://localhost");
   const requested = path.normalize(path.join(dist, decodeURIComponent(url.pathname)));
-  let file = requested.startsWith(dist) && existsSync(requested) && statSync(requested).isFile() ? requested : path.join(dist, "index.html");
+  const file = requested.startsWith(dist) && existsSync(requested) && statSync(requested).isFile() ? requested : path.join(dist, "index.html");
   if (!existsSync(file)) {
     res.statusCode = 404;
     res.end("Not found");

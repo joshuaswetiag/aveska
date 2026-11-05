@@ -24,6 +24,13 @@ type ExtractedVehicle = {
   application?: string | null;
 };
 
+async function countWhereBlank(table: "Customer" | "OrderItem", column: "email" | "name" | "productName") {
+  const rows = await prisma.$queryRawUnsafe<Array<{ n: number | bigint }>>(
+    `SELECT COUNT(*) as n FROM "${table}" WHERE "${column}" IS NULL OR trim("${column}") = ''`,
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
 function hasVehicleSignal(extracted: ExtractedVehicle | null | undefined) {
   if (!extracted) return false;
   const make = (extracted.make ?? "").trim();
@@ -50,7 +57,7 @@ export async function getDataQuality(): Promise<{
   cards: QualityCard[];
   totals: { customers: number; orderLines: number; products: number; vehicles: number };
 }> {
-  const [customers, orderLines, products, vehicles, orderItems, missingEmail, customersWithoutVehicle, missingProductName] =
+  const [customers, orderLines, products, vehicles, orderItems, missingEmail, customersWithoutVehicle, missingProductName, missingName] =
     await Promise.all([
       prisma.customer.count(),
       prisma.orderItem.count(),
@@ -59,11 +66,10 @@ export async function getDataQuality(): Promise<{
       prisma.orderItem.findMany({
         select: { productName: true, extractedVehicle: true, extractionConfidence: true, createdAt: true },
       }),
-      prisma.customer.count({
-        where: { OR: [{ email: null }, { emailNormalized: null }, { email: "" }] },
-      }),
+      countWhereBlank("Customer", "email"),
       prisma.customer.count({ where: { vehicles: { none: {} } } }),
-      prisma.orderItem.count({ where: { productName: "" } }),
+      countWhereBlank("OrderItem", "productName"),
+      countWhereBlank("Customer", "name"),
     ]);
 
   let notProcessed = 0;
@@ -114,7 +120,6 @@ export async function getDataQuality(): Promise<{
     _count: { _all: true },
     having: { emailNormalized: { _count: { gt: 1 } } },
     orderBy: { _count: { emailNormalized: "desc" } },
-    take: 8,
   });
   const skuGroups = await prisma.product.groupBy({
     by: ["skuNormalized"],
@@ -122,7 +127,6 @@ export async function getDataQuality(): Promise<{
     _count: { _all: true },
     having: { skuNormalized: { _count: { gt: 1 } } },
     orderBy: { _count: { skuNormalized: "desc" } },
-    take: 8,
   });
 
   const missingEmailSamples = await prisma.customer.findMany({
@@ -167,7 +171,7 @@ export async function getDataQuality(): Promise<{
     },
     {
       label: "Customers missing email",
-      value: missingEmail,
+      value: missingEmail + missingName,
       total: customers,
       href: "/customers",
       hint: "Cannot be included in campaign export until an email is added.",
@@ -194,7 +198,7 @@ export async function getDataQuality(): Promise<{
       value: emailGroups.length,
       href: "/customers",
       hint: "Same normalised email on more than one customer record.",
-      samples: emailGroups.map((row) => ({
+      samples: emailGroups.slice(0, 8).map((row) => ({
         label: row.emailNormalized ?? "—",
         detail: `${row._count._all} records`,
       })),
@@ -204,7 +208,7 @@ export async function getDataQuality(): Promise<{
       value: skuGroups.length,
       href: "/products",
       hint: "Same normalised SKU on more than one catalogue product.",
-      samples: skuGroups.map((row) => ({
+      samples: skuGroups.slice(0, 8).map((row) => ({
         label: row.skuNormalized ?? "—",
         detail: `${row._count._all} products`,
       })),

@@ -49,6 +49,7 @@ export function EmailPreview({
       <div className="flex justify-center overflow-x-auto rounded-2xl border border-border bg-muted/60 p-4">
         <iframe
           title="Email preview"
+          sandbox=""
           className="min-h-[640px] rounded-md bg-white shadow"
           style={{
             width: mobile ? 375 : 640,

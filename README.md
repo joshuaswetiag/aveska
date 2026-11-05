@@ -91,7 +91,7 @@ npm run cf:migrate
 
 For a local Miniflare D1: `npm run cf:migrate:local`.
 
-3. Seed production once (fresh D1). Easiest path: seed local SQLite, then copy critical rows, or run `npm run db:seed` against a temporary local file and re-import. For a brand-new deploy, seed locally for testing and create the admin user on D1 with the same password hash from your local `User` row, or re-run seed against a throwaway SQLite file and use Wrangler to insert that row.
+3. Create the first admin by setting the `ADMIN_EMAIL` and `ADMIN_PASSWORD` secrets, then open the Worker once. The app creates that user only when the User table is empty, and it will not reset an existing password. Do not copy a local SQLite file into D1: local Prisma stores dates as integer milliseconds and the D1 adapter stores ISO text, and mixing them breaks every date filter. To move an existing Postgres database, run `npx tsx scripts/migrate-postgres-to-d1.ts` with `POSTGRES_URL` set (requires `pg` installed). The script converts dates to ISO text and copies the suppression list.
 
 4. Build and deploy:
 

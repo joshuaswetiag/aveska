@@ -12,7 +12,7 @@ import {
   parseOrderReportFilters,
   vehicleLabelForOrderItem,
 } from "@/lib/orders/report";
-import { formatCurrency, zonedDayRange } from "@/lib/utils";
+import { formatCurrency, likeTerm, zonedDayRange } from "@/lib/utils";
 import { NextResponse } from "@/server/next-response";
 
 function notFound() {
@@ -33,7 +33,24 @@ async function dashboard() {
       prisma.customer.count({
         where: { isSuppressed: false, recommendations: { some: { status: { in: ["GENERATED", "APPROVED"] } } } },
       }),
-      prisma.order.findMany({ where: { orderDate: { not: null } }, select: { orderDate: true } }),
+      (async () => {
+        const dates: Array<{ orderDate: Date | null }> = [];
+        let cursor: string | undefined;
+        for (;;) {
+          const page = await prisma.order.findMany({
+            where: { orderDate: { not: null } },
+            select: { id: true, orderDate: true },
+            orderBy: { id: "asc" },
+            take: 500,
+            ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+          });
+          if (!page.length) break;
+          dates.push(...page);
+          cursor = page[page.length - 1].id;
+          if (page.length < 500) break;
+        }
+        return dates;
+      })(),
       prisma.vehicle.findMany({
         include: { _count: { select: { customerVehicles: true } } },
         orderBy: { customerVehicles: { _count: "desc" } },
@@ -67,7 +84,7 @@ async function dashboard() {
 }
 
 async function customers(url: URL) {
-  const q = url.searchParams.get("q")?.trim() || "";
+  const q = likeTerm(url.searchParams.get("q")?.trim() || "");
   const rows = await prisma.customer.findMany({
     where: q
       ? { OR: [{ name: { contains: q } }, { email: { contains: q } }] }
@@ -94,7 +111,7 @@ async function customer(id: string) {
 }
 
 async function products(url: URL) {
-  const q = url.searchParams.get("q")?.trim() || "";
+  const q = likeTerm(url.searchParams.get("q")?.trim() || "");
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
   const pageSize = 50;
   const where = q
@@ -163,13 +180,18 @@ async function vehicle(id: string) {
   });
   if (!row) return null;
   const customerIds = row.customerVehicles.map((item) => item.customerId);
-  const orders = await prisma.order.findMany({
-    where: { customerId: { in: customerIds } },
-    select: {
-      orderTotal: true,
-      items: { select: { productName: true, productId: true, product: { select: { url: true } } } },
-    },
-  });
+  const orders = [];
+  for (let index = 0; index < customerIds.length; index += 90) {
+    orders.push(
+      ...(await prisma.order.findMany({
+        where: { customerId: { in: customerIds.slice(index, index + 90) } },
+        select: {
+          orderTotal: true,
+          items: { select: { productName: true, productId: true, product: { select: { url: true } } } },
+        },
+      })),
+    );
+  }
   const revenue = orders.reduce((sum, order) => sum + Number(order.orderTotal ?? 0), 0);
   const purchased = new Map<string, { name: string; url: string | null; count: number }>();
   const purchasedIds = new Set<string>();

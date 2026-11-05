@@ -21,9 +21,16 @@ export function GlobalSearch() {
       return;
     }
     const handle = setTimeout(async () => {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-      setResults(await res.json());
-      setOpen(true);
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as SearchResult;
+        if (!data || !Array.isArray(data.customers)) return;
+        setResults(data);
+        setOpen(true);
+      } catch {
+        setOpen(false);
+      }
     }, 200);
     return () => clearTimeout(handle);
   }, [q]);

@@ -1,4 +1,6 @@
+import { auth } from "@/auth";
 import { handleApi } from "@/server/dispatch";
+import { requestContext } from "@/server/request-context";
 import { bindWorkerDb, type WorkerBindings } from "@/lib/db";
 import { bindWorkerUploads } from "@/lib/storage";
 import { processNextJob } from "@/lib/jobs/queue";
@@ -37,6 +39,12 @@ const STRING_ENV_KEYS = [
 function applyEnv(env: Env) {
   bindWorkerDb(env);
   bindWorkerUploads(env.UPLOADS);
+  if (!(globalThis as { aveskaAdminChecked?: boolean }).aveskaAdminChecked) {
+    (globalThis as { aveskaAdminChecked?: boolean }).aveskaAdminChecked = true;
+    void import("@/lib/ensure-admin")
+      .then(({ ensureFirstAdmin }) => ensureFirstAdmin())
+      .catch((error) => console.error("Could not create the first admin", error));
+  }
   // Object.entries(env) can omit secrets — copy known string bindings explicitly.
   for (const [key, value] of Object.entries(env)) {
     if (typeof value === "string") process.env[key] = value;
@@ -54,6 +62,9 @@ async function handleFetch(request: Request, env: Env, ctx: WorkerExecutionConte
   // Job processing can take many seconds — run in waitUntil so the browser never hangs
   // waiting for a response (which Cloudflare cancels, causing HTML "invalid response").
   if (request.method === "POST" && /^\/api\/jobs\/[^/]+\/process$/.test(url.pathname)) {
+    const session = await requestContext.run(request, () => auth());
+    if (!session?.user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    if (session.user.role === "READONLY") return Response.json({ error: "Forbidden" }, { status: 403 });
     ctx.waitUntil(
       handleApi(request).catch((error) => {
         console.error("background job process failed", error);
@@ -67,10 +78,7 @@ async function handleFetch(request: Request, env: Env, ctx: WorkerExecutionConte
       return await handleApi(request);
     } catch (error) {
       console.error("API error", error);
-      return Response.json(
-        { error: error instanceof Error ? error.message : "Internal error" },
-        { status: 500 },
-      );
+      return Response.json({ error: "Internal error" }, { status: 500 });
     }
   }
 
@@ -89,8 +97,12 @@ export default {
     ctx.waitUntil(
       (async () => {
         for (let i = 0; i < 4; i += 1) {
-          const id = await processNextJob();
-          if (!id) break;
+          try {
+            const id = await processNextJob();
+            if (!id) break;
+          } catch (error) {
+            console.error("scheduled job failed", error);
+          }
         }
       })(),
     );

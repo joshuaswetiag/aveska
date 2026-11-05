@@ -35,8 +35,9 @@ async function sendSummary(campaignId: string) {
   }));
   const pending = eligibleRecipients(mapped, suppressed).length;
   const ebaySkipped = campaign.recipients.filter((row) => {
-    if (row.sent) return false;
+    if (row.sent || row.customer.isSuppressed) return false;
     const email = row.customer.emailNormalized ?? normalizeEmail(row.customer.email);
+    if (!email || suppressed.has(email)) return false;
     return isEbayMemberEmail(email);
   }).length;
   const sent = campaign.recipients.filter((row) => row.sent).length;

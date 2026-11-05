@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { createManyIgnoreDuplicates } from "@/lib/create-many-safe";
 import { asStringArray, toJsonArray } from "@/lib/json-array";
 import type { LearnedVehicleKnowledge, VehicleExtraction } from "@/types";
 import { extractVehicle, canonicalVehicleName, vehicleSearchText, isIdentifiedVehicle } from "@/lib/vehicle/extract";
@@ -196,15 +197,16 @@ export async function backfillCustomerVehiclesFromOrders(
   const rows = [...links.values()];
   for (let index = 0; index < rows.length; index += 500) {
     const chunk = rows.slice(index, index + 500);
-    await prisma.customerVehicle.createMany({
-      data: chunk.map((row) => ({
+    await createManyIgnoreDuplicates(
+      (args) => prisma.customerVehicle.createMany(args as never),
+      (args) => prisma.customerVehicle.create(args as never),
+      chunk.map((row) => ({
         customerId: row.customerId,
         vehicleId: row.vehicleId,
         confidence: row.confidence,
         source: "order_extraction",
       })),
-      
-    });
+    );
     if (onProgress) {
       await onProgress(
         Math.min(index + chunk.length, rows.length),
@@ -345,11 +347,12 @@ export async function extractCatalogueFitments(onProgress?: (done: number, total
   }
 
   const vehicleList = [...vehiclesByName.values()];
-  for (let index = 0; index < vehicleList.length; index += 200) {
-    await prisma.vehicle.createMany({
-      data: vehicleList.slice(index, index + 200),
-      
-    });
+  for (let index = 0; index < vehicleList.length; index += 90) {
+    await createManyIgnoreDuplicates(
+      (args) => prisma.vehicle.createMany(args as never),
+      (args) => prisma.vehicle.create(args as never),
+      vehicleList.slice(index, index + 90),
+    );
   }
 
   const savedVehicles = await prisma.vehicle.findMany({
@@ -379,11 +382,12 @@ export async function extractCatalogueFitments(onProgress?: (done: number, total
       },
     ];
   });
-  for (let index = 0; index < fitments.length; index += 200) {
-    await prisma.productFitment.createMany({
-      data: fitments.slice(index, index + 200),
-      
-    });
+  for (let index = 0; index < fitments.length; index += 90) {
+    await createManyIgnoreDuplicates(
+      (args) => prisma.productFitment.createMany(args as never),
+      (args) => prisma.productFitment.create(args as never),
+      fitments.slice(index, index + 90),
+    );
   }
 
   await pruneProductTitleVehicles();
@@ -486,11 +490,12 @@ export async function harvestVehiclesFromOrderLines(
   }
 
   const rows = [...toCreate.values()];
-  for (let index = 0; index < rows.length; index += 200) {
-    await prisma.vehicle.createMany({
-      data: rows.slice(index, index + 200),
-      
-    });
+  for (let index = 0; index < rows.length; index += 90) {
+    await createManyIgnoreDuplicates(
+      (args) => prisma.vehicle.createMany(args as never),
+      (args) => prisma.vehicle.create(args as never),
+      rows.slice(index, index + 90),
+    );
   }
   return { scanned, created: rows.length };
 }
@@ -543,19 +548,96 @@ export async function extractOrderVehicles(onProgress?: (done: number, total: nu
   return links;
 }
 
+/** One page of catalogue fitments so a Worker can resume without loading every product. */
+export async function extractCatalogueFitmentChunk(cursor?: string | null, take = 40) {
+  const learned = await loadLearnedKnowledge();
+  const products = await prisma.product.findMany({
+    take,
+    orderBy: { id: "asc" },
+    ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+  });
+  for (const product of products) {
+    const extraction = extractVehicle(
+      {
+        name: product.name,
+        description: product.description,
+        sku: product.sku,
+        category: product.category,
+        fitment: product.fitment,
+        make: product.make,
+        model: product.model,
+        series: asStringArray(product.series),
+        bodyType: product.bodyType,
+      },
+      learned,
+    );
+    const vehicle = await upsertVehicleFromExtraction(extraction);
+    if (vehicle && extraction.confidence >= 0.5) {
+      await prisma.productFitment.upsert({
+        where: {
+          productId_vehicleId_isNegative: { productId: product.id, vehicleId: vehicle.id, isNegative: false },
+        },
+        update: { confidence: extraction.confidence, source: "extraction" },
+        create: {
+          productId: product.id,
+          vehicleId: vehicle.id,
+          source: "extraction",
+          confidence: extraction.confidence,
+          matchLevel: extraction.series.length ? "EXACT" : "SAME_FAMILY",
+          isNegative: false,
+        },
+      });
+    }
+  }
+  return {
+    done: products.length < take,
+    nextCursor: products.at(-1)?.id ?? null,
+    count: products.length,
+  };
+}
+
+/** One page of order-line vehicle links. Safe to run again. */
+export async function linkOrderVehiclesChunk(cursor?: string | null, take = 80) {
+  const items = await prisma.orderItem.findMany({
+    where: { extractionConfidence: { gte: 0.5 } },
+    take,
+    orderBy: { id: "asc" },
+    ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+    select: {
+      id: true,
+      extractionConfidence: true,
+      extractedVehicle: true,
+      order: { select: { customerId: true } },
+    },
+  });
+  for (const item of items) {
+    const extraction = item.extractedVehicle as VehicleExtraction | null;
+    if (!extraction) continue;
+    await linkCustomerVehicleFromExtraction(item.order.customerId, extraction, Number(item.extractionConfidence ?? extraction.confidence));
+  }
+  return {
+    done: items.length < take,
+    nextCursor: items.at(-1)?.id ?? null,
+    count: items.length,
+  };
+}
+
 export async function pruneProductTitleVehicles() {
   const vehicles = await prisma.vehicle.findMany({ select: { id: true, canonicalName: true } });
   const badIds = vehicles.filter((vehicle) => looksLikeProductTitle(vehicle.canonicalName)).map((vehicle) => vehicle.id);
   if (!badIds.length) return { deleted: 0 };
 
-  await prisma.recommendation.deleteMany({ where: { vehicleId: { in: badIds } } });
-  await prisma.customerVehicle.deleteMany({ where: { vehicleId: { in: badIds } } });
-  await prisma.productFitment.deleteMany({ where: { vehicleId: { in: badIds } } });
-  await prisma.customer.updateMany({
-    where: { mainVehicleId: { in: badIds } },
-    data: { mainVehicleId: null },
-  });
-  await prisma.vehicle.deleteMany({ where: { id: { in: badIds } } });
+  for (let index = 0; index < badIds.length; index += 90) {
+    const ids = badIds.slice(index, index + 90);
+    await prisma.recommendation.deleteMany({ where: { vehicleId: { in: ids } } });
+    await prisma.customerVehicle.deleteMany({ where: { vehicleId: { in: ids } } });
+    await prisma.productFitment.deleteMany({ where: { vehicleId: { in: ids } } });
+    await prisma.customer.updateMany({
+      where: { mainVehicleId: { in: ids } },
+      data: { mainVehicleId: null },
+    });
+    await prisma.vehicle.deleteMany({ where: { id: { in: ids } } });
+  }
   return { deleted: badIds.length };
 }
 
@@ -566,12 +648,15 @@ export async function pruneOrphanVehicles() {
   });
   const ids = orphans.map((vehicle) => vehicle.id);
   if (!ids.length) return { deleted: 0 };
-  await prisma.recommendation.deleteMany({ where: { vehicleId: { in: ids } } });
-  await prisma.customer.updateMany({
-    where: { mainVehicleId: { in: ids } },
-    data: { mainVehicleId: null },
-  });
-  await prisma.vehicle.deleteMany({ where: { id: { in: ids } } });
+  for (let index = 0; index < ids.length; index += 90) {
+    const chunk = ids.slice(index, index + 90);
+    await prisma.recommendation.deleteMany({ where: { vehicleId: { in: chunk } } });
+    await prisma.customer.updateMany({
+      where: { mainVehicleId: { in: chunk } },
+      data: { mainVehicleId: null },
+    });
+    await prisma.vehicle.deleteMany({ where: { id: { in: chunk } } });
+  }
   return { deleted: ids.length };
 }
 

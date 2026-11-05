@@ -13,6 +13,7 @@ export type R2ObjectBody = {
 export type R2Bucket = {
   put(key: string, value: ArrayBuffer | ArrayBufferView | string | Blob | null): Promise<unknown>;
   get(key: string): Promise<R2ObjectBody | null>;
+  delete(key: string): Promise<void>;
 };
 
 export type WorkerAssetFetcher = {

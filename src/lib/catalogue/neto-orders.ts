@@ -81,8 +81,6 @@ const LIVE_STATUSES = [
   "Pending Dispatch",
   "Dispatched",
   "On Hold",
-  "Quote",
-  "Quote Sent",
 ];
 
 export type NetoOrderSyncOptions = {
@@ -387,10 +385,6 @@ export async function syncNetoOrders(
       );
     }
     await options?.onPage?.({ nextPage, imported });
-    if (orders.length < pageSize) {
-      done = true;
-      break;
-    }
     page += 1;
     if (page > 2000) {
       done = true;

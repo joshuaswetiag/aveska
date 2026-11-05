@@ -16,6 +16,9 @@ export async function saveUpload(relativeName: string, data: Buffer | Uint8Array
     await globalStore.aveskaUploads.put(key, data);
     return `uploads/${key}`;
   }
+  if (process.env.AVESKA_RUNTIME === "worker") {
+    throw new Error("File uploads need an R2 bucket. Enable R2 and bind UPLOADS in wrangler.toml.");
+  }
   const { mkdir, writeFile } = await import("fs/promises");
   const path = await import("path");
   const uploadDir = path.join(process.cwd(), "uploads");
@@ -23,6 +26,17 @@ export async function saveUpload(relativeName: string, data: Buffer | Uint8Array
   const filePath = path.join(uploadDir, key);
   await writeFile(filePath, data);
   return filePath;
+}
+
+export async function deleteUpload(filePath: string) {
+  const key = keyFromPath(filePath);
+  if (globalStore.aveskaUploads) {
+    await globalStore.aveskaUploads.delete(key);
+    return;
+  }
+  if (process.env.AVESKA_RUNTIME === "worker") return;
+  const { unlink } = await import("fs/promises");
+  await unlink(filePath).catch(() => undefined);
 }
 
 export async function readUpload(filePath: string) {

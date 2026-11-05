@@ -5,7 +5,14 @@ export { applyTemplate } from "@/lib/email/apply-template";
 
 export interface EmailProvider {
   name: string;
-  send(payload: { to: string; subject: string; html: string; from?: string }): Promise<{ id: string }>;
+  send(payload: {
+    to: string;
+    subject: string;
+    html: string;
+    from?: string;
+    idempotencyKey?: string;
+    listUnsubscribe?: string;
+  }): Promise<{ id: string }>;
   sendBatch(payloads: Array<{ to: string; subject: string; html: string; from?: string }>): Promise<{ ids: string[] }>;
   getCampaignStats(campaignId: string): Promise<Record<string, number>>;
   validateEmail(email: string): Promise<boolean>;
@@ -36,6 +43,21 @@ export function getEmailProvider(): EmailProvider {
   return new ExportOnlyEmailProvider();
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function safeUrl(value: string) {
+  const trimmed = value.trim();
+  if (/^https?:\/\//i.test(trimmed)) return escapeHtml(trimmed);
+  return "#";
+}
+
 export function renderEmailHtml(
   copy: Omit<EmailCopy, "html">,
   products: Array<{
@@ -56,14 +78,14 @@ export function renderEmailHtml(
               <td width="72" valign="top" style="width:72px;">
                 ${
                   product.imageUrl
-                    ? `<img src="${product.imageUrl}" alt="" width="64" height="64" style="display:block;width:64px;max-width:64px;height:64px;object-fit:cover;border-radius:6px;background:#f6f6f6;" />`
+                    ? `<img src="${safeUrl(product.imageUrl)}" alt="" width="64" height="64" style="display:block;width:64px;max-width:64px;height:64px;object-fit:cover;border-radius:6px;background:#f6f6f6;" />`
                     : `<div style="width:64px;height:64px;border-radius:6px;background:#f6f6f6;text-align:center;line-height:64px;color:#555555;font-size:11px;">Aveska</div>`
                 }
               </td>
               <td valign="top" style="padding-left:12px;word-break:break-word;overflow-wrap:anywhere;">
-                <div style="font-weight:600;color:#1a1a1a;font-size:15px;line-height:1.35;word-break:break-word;overflow-wrap:anywhere;">${product.name}</div>
-                ${product.price ? `<div style="color:#555555;font-size:13px;margin-top:4px;">${product.price}</div>` : ""}
-                <a href="${product.url}" style="display:inline-block;margin-top:8px;color:${AVESKA_RED};font-size:13px;">View product</a>
+                <div style="font-weight:600;color:#1a1a1a;font-size:15px;line-height:1.35;word-break:break-word;overflow-wrap:anywhere;">${escapeHtml(product.name)}</div>
+                ${product.price ? `<div style="color:#555555;font-size:13px;margin-top:4px;">${escapeHtml(product.price)}</div>` : ""}
+                <a href="${safeUrl(product.url)}" style="display:inline-block;margin-top:8px;color:${AVESKA_RED};font-size:13px;">View product</a>
               </td>
             </tr>
           </table>
@@ -97,19 +119,19 @@ export function renderEmailHtml(
       <table role="presentation" class="email-shell" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid #eeeeee;border-radius:4px;">
         <tr>
           <td class="email-header" style="background:#ffffff;padding:22px 24px;text-align:center;border-bottom:4px solid ${AVESKA_RED};">
-            <a href="${shopHref}" style="display:inline-block;text-decoration:none;">
+            <a href="${safeUrl(shopHref)}" style="display:inline-block;text-decoration:none;">
               <img class="email-logo" src="${logoSrc}" alt="Aveska Auto &amp; Restoration Parts &amp; Accessories" width="280" style="display:block;margin:0 auto;width:280px;max-width:100%;height:auto;border:0;background:#ffffff;" />
             </a>
           </td>
         </tr>
         <tr><td class="email-pad" style="padding:24px;background:#ffffff;word-break:break-word;overflow-wrap:anywhere;">
-          <p style="margin:0 0 16px;color:#1a1a1a;font-size:16px;">${copy.greeting}</p>
-          <div style="color:#333333;font-size:15px;line-height:1.6;">${copy.body.replaceAll("\n", "<br/>")}</div>
+          <p style="margin:0 0 16px;color:#1a1a1a;font-size:16px;">${escapeHtml(copy.greeting)}</p>
+          <div style="color:#333333;font-size:15px;line-height:1.6;">${escapeHtml(copy.body).replaceAll("\n", "<br/>")}</div>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;margin-top:20px;">${cards}</table>
           <p style="margin:28px 0;">
-            <a href="${copy.ctaUrl}" style="background:${AVESKA_RED};color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:0;display:inline-block;font-weight:700;letter-spacing:0.04em;">${copy.ctaLabel}</a>
+            <a href="${safeUrl(copy.ctaUrl)}" style="background:${AVESKA_RED};color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:0;display:inline-block;font-weight:700;letter-spacing:0.04em;">${escapeHtml(copy.ctaLabel)}</a>
           </p>
-          <p style="color:#555555;font-size:13px;line-height:1.5;">${copy.footer.replaceAll("\n", "<br/>")}</p>
+          <p style="color:#555555;font-size:13px;line-height:1.5;">${escapeHtml(copy.footer).replaceAll("\n", "<br/>")}</p>
         </td></tr>
       </table>
     </td></tr>

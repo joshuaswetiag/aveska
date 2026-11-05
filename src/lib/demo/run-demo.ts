@@ -70,6 +70,10 @@ const CATALOGUE = [
 ];
 
 export async function runDemo(onProgress?: (done: number, total: number, message?: string) => Promise<void>) {
+  const liveProducts = await prisma.product.count({ where: { NOT: { sku: { startsWith: "AV-" } } } });
+  if (liveProducts > 0) {
+    throw new Error("Demo data is blocked because this database already has live catalogue products.");
+  }
   await onProgress?.(1, 6, "Creating demo catalogue");
   for (const item of CATALOGUE) {
     const existing = await prisma.product.findFirst({ where: { sku: item.sku } });

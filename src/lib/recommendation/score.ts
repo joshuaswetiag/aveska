@@ -56,11 +56,16 @@ function purchasedRecently(
 ): boolean {
   if (!sku || !purchasedSkus?.length) return false;
   const needle = sku.trim().toLowerCase();
-  const match = purchasedSkus.find((p) => p.sku.trim().toLowerCase() === needle);
-  if (!match) return false;
+  const matches = purchasedSkus.filter((p) => p.sku.trim().toLowerCase() === needle);
+  if (!matches.length) return false;
   if (cooldownDays === "never") return true;
-  if (!match.purchasedAt) return true;
-  const elapsed = (now.getTime() - match.purchasedAt.getTime()) / 86400000;
+  const latest = matches.reduce<Date | null>((best, row) => {
+    if (!row.purchasedAt) return best;
+    if (!best || row.purchasedAt.getTime() > best.getTime()) return row.purchasedAt;
+    return best;
+  }, null);
+  if (!latest) return true;
+  const elapsed = (now.getTime() - latest.getTime()) / 86400000;
   return elapsed <= cooldownDays;
 }
 
@@ -132,7 +137,7 @@ export function scoreRecommendation(input: MatchInput): RecommendationScore {
     };
   }
 
-  if (customer.make && product.make && !makeMatch) {
+  if (customer.make && product.make && !makeMatch && !product.explicitCompatibility) {
     return {
       score: 0,
       scoreRaw: -100,

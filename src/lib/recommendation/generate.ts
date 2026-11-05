@@ -32,6 +32,8 @@ export async function generateRecommendations(options?: {
   onProgress?: (done: number, total: number) => Promise<void>;
   skipSegments?: boolean;
   resume?: boolean;
+  maxCustomers?: number;
+  cursor?: string | null;
 }) {
   const settings = await prisma.settings.upsert({
     where: { id: "default" },
@@ -42,7 +44,24 @@ export async function generateRecommendations(options?: {
   const cooldown = settings.cooldownDays === 0 ? ("never" as const) : settings.cooldownDays;
 
   const products = await prisma.product.findMany({
-    include: { fitments: true, overrides: true },
+    select: {
+      id: true,
+      make: true,
+      model: true,
+      vehicleFamily: true,
+      series: true,
+      bodyType: true,
+      yearFrom: true,
+      yearTo: true,
+      fitment: true,
+      sku: true,
+      category: true,
+      tags: true,
+      discontinued: true,
+      stockStatus: true,
+      fitments: { select: { vehicleId: true, isNegative: true } },
+      overrides: { select: { isCompatible: true, make: true, series: true } },
+    },
   });
   const productsByMake = new Map<string, typeof products>();
   const productsByVehicle = new Map<string, typeof products>();
@@ -72,7 +91,8 @@ export async function generateRecommendations(options?: {
 
   let done = 0;
   let created = 0;
-  let cursor: string | undefined;
+  let cursor: string | undefined = options?.cursor || undefined;
+  let finished = false;
   let pending: Array<{
     customerId: string;
     productId: string;
@@ -87,12 +107,12 @@ export async function generateRecommendations(options?: {
 
   const flush = async () => {
     if (!pending.length) return;
-    await createManyIgnoreDuplicates(
+    const result = await createManyIgnoreDuplicates(
       (args) => prisma.recommendation.createMany(args as { data: typeof pending }),
       (args) => prisma.recommendation.create(args as { data: (typeof pending)[number] }),
       pending,
     );
-    created += pending.length;
+    created += result.inserted;
     pending = [];
   };
 
@@ -114,6 +134,11 @@ export async function generateRecommendations(options?: {
     });
     if (!customers.length) break;
     cursor = customers[customers.length - 1].id;
+    if (!options?.resume) {
+      await prisma.recommendation.deleteMany({
+        where: { customerId: { in: customers.map((row) => row.id) }, status: "GENERATED" },
+      });
+    }
 
     for (const customer of customers) {
       const purchasedSkus = customer.orders.flatMap((order) =>
@@ -141,7 +166,9 @@ export async function generateRecommendations(options?: {
           const explicitFitment = product.fitments.some(
             (f) => !f.isNegative && f.vehicleId === customerVehicle.vehicleId,
           );
-          const negative = product.overrides.some((o) => !o.isCompatible) || product.fitments.some((f) => f.isNegative);
+          const negative =
+            product.fitments.some((f) => f.isNegative && f.vehicleId === customerVehicle.vehicleId) ||
+            product.overrides.some((o) => !o.isCompatible && overrideApplies(o, customerVehicle.vehicle));
           const vehicleSeries = asStringArray(customerVehicle.vehicle.series);
           const positiveOverride = product.overrides.some((o) => {
             const series = asStringArray(o.series);
@@ -199,13 +226,31 @@ export async function generateRecommendations(options?: {
       }
       done += 1;
       if (options?.onProgress) await options.onProgress(done, Math.max(total, 1));
+      if (options?.maxCustomers && done >= options.maxCustomers) {
+        cursor = customer.id;
+        await flush();
+        return { customers: total, recommendations: created, cursor, finished: false, processed: done };
+      }
     }
     await flush();
   }
+  finished = true;
 
   await flush();
-  if (!options?.skipSegments && !options?.resume) await segmentCustomers();
-  return { customers: total, recommendations: created };
+  if (!options?.skipSegments && !options?.resume && finished) await segmentCustomers();
+  return { customers: total, recommendations: created, cursor: cursor ?? null, finished, processed: done };
+}
+
+function overrideApplies(
+  override: { make: string | null; series: unknown },
+  vehicle: { make: string; series: unknown },
+) {
+  const series = asStringArray(override.series);
+  const vehicleSeries = asStringArray(vehicle.series);
+  if (!override.make && !series.length) return true;
+  if (override.make && override.make.toLowerCase() !== vehicle.make.toLowerCase()) return false;
+  if (series.length && !series.some((code) => vehicleSeries.includes(code))) return false;
+  return true;
 }
 
 export async function segmentCustomers() {

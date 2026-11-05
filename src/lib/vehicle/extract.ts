@@ -31,6 +31,26 @@ function tokenize(text: string): string[] {
     .filter(Boolean);
 }
 
+function boundedIncludes(text: string, term: string) {
+  const lower = text.toLowerCase();
+  const needle = term.toLowerCase();
+  if (!needle) return false;
+  let from = 0;
+  while (from < lower.length) {
+    const index = lower.indexOf(needle, from);
+    if (index === -1) return false;
+    const before = index === 0 || !/[a-z0-9]/i.test(lower[index - 1] ?? "");
+    const after = index + needle.length >= lower.length || !/[a-z0-9]/i.test(lower[index + needle.length] ?? "");
+    if (before && after) return true;
+    from = index + needle.length;
+  }
+  return false;
+}
+
+function aliasInText(text: string, alias: string) {
+  return boundedIncludes(text, alias);
+}
+
 function detectMake(
   text: string,
   makes: Record<string, string[]>,
@@ -46,7 +66,7 @@ function detectMake(
         index + alias.length >= lower.length ||
         !/[a-z0-9]/i.test(lower[index + alias.length] ?? "");
       if (!before || !after) continue;
-      if (!best || index < best.index || alias.length > best.alias.length) {
+      if (!best || index < best.index || (index === best.index && alias.length > best.alias.length)) {
         best = { make, alias, index };
       }
     }
@@ -60,7 +80,7 @@ function detectBodyType(text: string): string | null {
   const lower = text.toLowerCase();
   const sorted = [...BODY_TYPES].sort((a, b) => b.length - a.length);
   for (const body of sorted) {
-    if (lower.includes(body)) {
+    if (boundedIncludes(lower, body)) {
       if (body === "ute" || body === "utility") return "Ute";
       if (body === "hatch" || body === "hatchback") return "Hatch";
       if (body === "wagon" || body === "station wagon") return "Wagon";
@@ -234,7 +254,7 @@ export function extractVehicle(
   const evidence: string[] = [];
 
   const aliasHit = knowledge.aliases
-    .filter((a) => a.alias && vehiclePart.toLowerCase().includes(a.alias.toLowerCase()))
+    .filter((a) => a.alias && aliasInText(vehiclePart, a.alias))
     .sort((a, b) => b.alias.length - a.alias.length)[0];
 
   let make = input.make && !looksLikeProductTitle(input.make) ? normalizeWhitespace(input.make) : null;

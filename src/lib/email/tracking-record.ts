@@ -117,13 +117,13 @@ export async function recordCampaignTraffic(input: {
         opened: true,
         clicked: true,
         openedAt: recipient.opened ? undefined : now,
-        clickedAt: now,
+        clickedAt: recipient.clicked ? undefined : now,
       },
     });
     await prisma.campaign.update({
       where: { id: recipient.campaignId },
       data: {
-        clicked: { increment: 1 },
+        clicked: recipient.clicked ? undefined : { increment: 1 },
         opened: recipient.opened ? undefined : { increment: 1 },
       },
     });

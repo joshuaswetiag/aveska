@@ -80,6 +80,11 @@ export function parseSpreadsheet(buffer: Buffer, fileName: string): ParsedSpread
   return rowsFromMatrix(matrix);
 }
 
+function csvSafe(value: unknown) {
+  const text = value == null ? "" : String(value);
+  return /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+}
+
 export function toCsv(rows: Record<string, unknown>[]): string {
-  return Papa.unparse(rows);
+  return Papa.unparse(rows.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, csvSafe(value)]))));
 }

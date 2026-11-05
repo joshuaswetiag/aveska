@@ -73,8 +73,6 @@ export function parseDate(value: unknown): Date | null {
   }
   const text = String(value).trim();
   if (!text) return null;
-  const iso = Date.parse(text);
-  if (!Number.isNaN(iso)) return new Date(iso);
   const au = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
   if (au) {
     const day = Number(au[1]);
@@ -82,9 +80,21 @@ export function parseDate(value: unknown): Date | null {
     let year = Number(au[3]);
     if (year < 100) year += year > 50 ? 1900 : 2000;
     const date = new Date(year, month, day);
-    return Number.isNaN(date.getTime()) ? null : date;
+    if (date.getFullYear() === year && date.getMonth() === month && date.getDate() === day) return date;
   }
+  const iso = Date.parse(text);
+  if (!Number.isNaN(iso)) return new Date(iso);
   return null;
+}
+
+/** D1 rejects LIKE patterns longer than 50 bytes. Keep the user text under that, including the wildcards Prisma adds. */
+export function likeTerm(value: string, maxBytes = 48) {
+  const text = value.trim();
+  const bytes = Buffer.from(text);
+  if (bytes.length <= maxBytes) return text;
+  let end = maxBytes;
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1;
+  return bytes.subarray(0, end).toString("utf8");
 }
 
 export const STORE_TIMEZONE = "Australia/Sydney";

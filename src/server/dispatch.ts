@@ -47,6 +47,7 @@ const routes: Route[] = [
   { method: "POST", pattern: /^\/api\/products\/([^/]+)\/overrides$/, keys: ["id"], load: () => import("@/app/api/products/[id]/overrides/route") },
   { method: "POST", pattern: /^\/api\/customers\/([^/]+)\/vehicles$/, keys: ["id"], load: () => import("@/app/api/customers/[id]/vehicles/route") },
   { method: "GET", pattern: /^\/t\/([^/]+)\/open$/, keys: ["recipientId"], load: () => import("@/app/t/[recipientId]/open/route") },
+  { method: "GET", pattern: /^\/t\/([^/]+)\/unsubscribe$/, keys: ["recipientId"], load: () => import("@/app/t/[recipientId]/unsubscribe/route") },
   { method: "GET", pattern: /^\/t\/([^/]+)$/, keys: ["recipientId"], load: () => import("@/app/t/[recipientId]/route") },
 ];
 

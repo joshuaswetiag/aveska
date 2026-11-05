@@ -5,7 +5,8 @@ import { htmlWithInlineLogo, restyleCampaignHtml } from "../src/lib/email/logo";
 import { loadMailSettings } from "../src/lib/email/settings-store";
 import { formatFromHeader, getMailConfig, getMailPassword } from "../src/lib/email/config";
 
-const TEST_TO = "nadimmahmudytd@gmail.com";
+const TEST_TO = process.env.TEST_EMAIL?.trim();
+if (!TEST_TO) throw new Error("Set TEST_EMAIL to the address that should receive the test.");
 
 async function main() {
   let campaign = await prisma.campaign.findFirst({

@@ -110,7 +110,13 @@ export class SmtpEmailProvider implements EmailProvider {
     return headers;
   }
 
-  async send(payload: { to: string; subject: string; html: string; from?: string }): Promise<{ id: string }> {
+  async send(payload: {
+    to: string;
+    subject: string;
+    html: string;
+    from?: string;
+    listUnsubscribe?: string;
+  }): Promise<{ id: string }> {
     const stored = this.stored ?? (await loadStoredMail());
     this.stored = stored;
     const config = getMailConfig(stored);
@@ -124,7 +130,10 @@ export class SmtpEmailProvider implements EmailProvider {
         text: htmlToText(outbound.html),
         attachments: outbound.attachments,
         replyTo: config.replyTo || undefined,
-        headers: this.extraHeaders(payload.subject),
+        headers: {
+          ...this.extraHeaders(payload.subject),
+          ...(payload.listUnsubscribe ? { "List-Unsubscribe": `<${payload.listUnsubscribe}>` } : {}),
+        },
       });
       return { id: String(info.messageId || info.response || `smtp-${Date.now()}`) };
     } catch (error) {

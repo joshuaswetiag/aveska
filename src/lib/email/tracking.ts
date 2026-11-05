@@ -153,13 +153,14 @@ export function wrapEmailHtmlForTracking(html: string, recipientId: string, base
     const tracked = `${origin}/t/${encodeURIComponent(recipientId)}?u=${encodeURIComponent(dest)}`;
     return `href=${quote}${tracked}${quote}`;
   });
+  const unsubscribe = `${origin}/t/${encodeURIComponent(recipientId)}/unsubscribe`;
+  const footer = `<p style="margin:16px 0 0;color:#777777;font-size:12px;line-height:1.5;">If you no longer want these emails, <a href="${unsubscribe}" style="color:#777777;">unsubscribe</a>.</p>`;
   const pixel = `<img src="${origin}/t/${encodeURIComponent(recipientId)}/open" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;" />`;
-  if (
+  const alreadyOpen =
     withLinks.includes(`${origin}/t/${recipientId}/open`) ||
-    withLinks.includes(`${origin}/t/${encodeURIComponent(recipientId)}/open`)
-  ) {
-    return withLinks;
-  }
-  if (/<\/body>/i.test(withLinks)) return withLinks.replace(/<\/body>/i, `${pixel}</body>`);
-  return `${withLinks}${pixel}`;
+    withLinks.includes(`${origin}/t/${encodeURIComponent(recipientId)}/open`);
+  const extra = `${withLinks.includes("/unsubscribe") ? "" : footer}${alreadyOpen ? "" : pixel}`;
+  if (!extra) return withLinks;
+  if (/<\/body>/i.test(withLinks)) return withLinks.replace(/<\/body>/i, `${extra}</body>`);
+  return `${withLinks}${extra}`;
 }

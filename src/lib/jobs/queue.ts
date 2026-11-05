@@ -29,44 +29,44 @@ export async function enqueueJob(input: {
   });
 }
 
+function jobMeta(payload: unknown): { attempts?: number; nextRunAt?: string } {
+  if (!payload || typeof payload !== "object") return {};
+  return payload as { attempts?: number; nextRunAt?: string };
+}
+
 export async function processNextJob(jobId?: string) {
-  const staleNeto = new Date(Date.now() - 45_000);
+  const staleBefore = new Date(Date.now() - 45_000);
+  const now = Date.now();
   const job = jobId
     ? await prisma.job.findUnique({ where: { id: jobId } })
-    : await prisma.job.findFirst({
-        where: {
-          OR: [
-            { status: "QUEUED" },
-            { status: "FAILED", type: "NETO_SYNC" },
-            { status: "RUNNING", type: "NETO_SYNC", updatedAt: { lt: staleNeto } },
-          ],
-        },
-        orderBy: { createdAt: "asc" },
-      });
+    : (
+        await prisma.job.findMany({
+          where: {
+            OR: [{ status: "QUEUED" }, { status: "RUNNING", updatedAt: { lt: staleBefore } }],
+          },
+          orderBy: { createdAt: "asc" },
+          take: 20,
+        })
+      ).find((row) => {
+        const next = jobMeta(row.payload).nextRunAt;
+        return !(row.status === "QUEUED" && next && Date.parse(next) > now);
+      }) ?? null;
   if (!job || job.status === "COMPLETED" || job.status === "CANCELLED") return job?.id ?? null;
+  if (job.status === "FAILED" && !jobId) return null;
   if (job.status !== "QUEUED" && job.status !== "RUNNING" && job.status !== "FAILED") return null;
 
   const inflight = (globalThis as { aveskaJobsInFlight?: Set<string> }).aveskaJobsInFlight ?? new Set<string>();
   (globalThis as { aveskaJobsInFlight?: Set<string> }).aveskaJobsInFlight = inflight;
   if (inflight.has(job.id)) return job.id;
-  if (job.status === "RUNNING") {
-    const staleMs = Date.now() - job.updatedAt.getTime();
-    // waitUntil chunks need a longer lease so overlapping Workers don't corrupt page state.
-    if (job.type === "NETO_SYNC") {
-      if (staleMs < 45_000) return job.id;
-    } else {
-      const sendStuck = job.type === "SEND_CAMPAIGN" && job.progress === 0 && staleMs > 45_000;
-      if (!sendStuck && staleMs < 90_000) return job.id;
-    }
-  }
+  if (job.status === "RUNNING" && Date.now() - job.updatedAt.getTime() < 45_000) return job.id;
   inflight.add(job.id);
 
   try {
     const claimed = await prisma.job.updateMany({
-      where: {
-        id: job.id,
-        status: job.status === "RUNNING" ? "RUNNING" : { in: ["QUEUED", "FAILED"] },
-      },
+      where:
+        job.status === "RUNNING"
+          ? { id: job.id, status: "RUNNING", updatedAt: job.updatedAt }
+          : { id: job.id, status: job.status === "FAILED" ? "FAILED" : "QUEUED" },
       data:
         job.progress > 0
           ? { status: "RUNNING", errorMessage: null }
@@ -99,22 +99,21 @@ export async function processNextJob(jobId?: string) {
       const importJob = await prisma.importJob.findUniqueOrThrow({ where: { id: job.importJobId } });
       if (!importJob.filePath || !importJob.columnMapping) throw new Error("Import is missing file or column mapping");
       const buffer = await readUpload(importJob.filePath);
+      const uploadPath = importJob.filePath;
       const parsed = parseSpreadsheet(buffer, importJob.fileName);
       await progress(0, parsed.rows.length, "Importing rows");
       const mapping = importJob.columnMapping as ColumnMapping;
       if (importJob.type === "ORDERS") result = await importOrders(importJob.id, parsed.rows, mapping);
       else if (importJob.type === "CATALOGUE") result = await importCatalogue(importJob.id, parsed.rows, mapping);
       else result = (await importSuppressions(importJob.id, parsed.rows, mapping), { ok: true });
+      const { deleteUpload } = await import("@/lib/storage");
+      await deleteUpload(uploadPath).catch(() => undefined);
     } else if (job.type === "EXTRACT_VEHICLES") {
       await extractCatalogueFitments(progress);
       await extractOrderVehicles(progress);
       result = { ok: true };
     } else if (job.type === "GENERATE_RECOMMENDATIONS") {
-      await prisma.job.update({
-        where: { id: job.id },
-        data: { status: "CANCELLED", message: "Recommendation generation is paused", completedAt: new Date() },
-      });
-      return job.id;
+      result = await generateRecommendations({ onProgress: progress });
     } else if (job.type === "ANALYSE_CUSTOMERS") {
       await extractCatalogueFitments(progress);
       await extractOrderVehicles(progress);
@@ -152,7 +151,10 @@ export async function processNextJob(jobId?: string) {
             kind: "full",
             from: payload.from,
             to: payload.to,
-            phase: (payload.phase as "products" | "orders" | "done" | undefined) ?? "products",
+            phase: (payload.phase as "products" | "orders" | "vehicles" | "links" | "recommendations" | "done" | undefined) ?? "products",
+            recommendationCursor: (payload as { recommendationCursor?: string | null }).recommendationCursor,
+            fitmentCursor: (payload as { fitmentCursor?: string | null }).fitmentCursor,
+            linkCursor: (payload as { linkCursor?: string | null }).linkCursor,
             productPage: payload.productPage,
             orderPage: payload.orderPage,
             importedProducts: payload.importedProducts,
@@ -162,20 +164,24 @@ export async function processNextJob(jobId?: string) {
           },
           progress,
           async (state) => {
-            await prisma.job.update({
-              where: { id: job.id },
+            const saved = await prisma.job.updateMany({
+              where: { id: job.id, status: "RUNNING" },
               data: {
-                status: "RUNNING",
                 payload: state as object,
-                message: `Imported ${(state.importedProducts ?? 0).toLocaleString()} live products`,
-                errorMessage: null,
+                message:
+                  state.phase === "orders"
+                    ? `Imported ${(state.importedOrders ?? 0).toLocaleString()} orders`
+                    : state.phase === "vehicles" || state.phase === "links"
+                      ? "Matching vehicles…"
+                      : `Imported ${(state.importedProducts ?? 0).toLocaleString()} live products`,
               },
             });
+            if (saved.count === 0) throw new Error("Sync was cancelled");
           },
         );
         if (!advanced.done) {
-          await prisma.job.update({
-            where: { id: job.id },
+          await prisma.job.updateMany({
+            where: { id: job.id, status: "RUNNING" },
             data: {
               status: "QUEUED",
               payload: advanced.payload as object,
@@ -228,6 +234,13 @@ export async function processNextJob(jobId?: string) {
         recipientId: payload.recipientId,
         onProgress: progress,
       });
+      if ((result as { paused?: boolean }).paused) {
+        await prisma.job.updateMany({
+          where: { id: job.id, status: "RUNNING" },
+          data: { status: "QUEUED", message: "Continuing send…", result: result as object },
+        });
+        return job.id;
+      }
     } else if (job.type === "SEGMENT_CUSTOMERS") {
       const { segmentCustomers } = await import("@/lib/recommendation/generate");
       await segmentCustomers();
@@ -252,9 +265,26 @@ export async function processNextJob(jobId?: string) {
     return job.id;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Job failed";
+    const attempts = (jobMeta(job.payload).attempts ?? 0) + 1;
+    if (job.type === "NETO_SYNC" && attempts < 5) {
+      const delayMs = Math.min(30, 2 ** attempts) * 60_000;
+      await prisma.job.update({
+        where: { id: job.id },
+        data: {
+          status: "QUEUED",
+          errorMessage: message,
+          payload: {
+            ...((job.payload ?? {}) as object),
+            attempts,
+            nextRunAt: new Date(Date.now() + delayMs).toISOString(),
+          },
+        },
+      });
+      return job.id;
+    }
     await prisma.job.update({
       where: { id: job.id },
-      data: { status: "FAILED", errorMessage: message, completedAt: new Date() },
+      data: { status: "FAILED", errorMessage: message, completedAt: new Date(), payload: { ...((job.payload ?? {}) as object), attempts } },
     });
     if (job.importJobId) {
       await prisma.importJob.update({

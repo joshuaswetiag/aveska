@@ -13,6 +13,9 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   if (!campaign) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (action === "approve") {
+    if (!["DRAFT", "GENERATED", "IN_REVIEW"].includes(campaign.status)) {
+      return NextResponse.json({ error: "Only a draft or generated campaign can be approved" }, { status: 409 });
+    }
     await prisma.campaign.update({
       where: { id },
       data: { status: "APPROVED", approvedAt: new Date(), approvedById: session.user.id },
@@ -36,6 +39,11 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     });
     return NextResponse.json({ campaignId: copy.id });
   } else if (action === "delete") {
+    const sent = await prisma.campaignRecipient.count({ where: { campaignId: id, sent: true } });
+    if (sent > 0) {
+      await prisma.campaign.update({ where: { id }, data: { status: "ARCHIVED" } });
+      return NextResponse.json({ ok: true, archived: true });
+    }
     await prisma.campaign.delete({ where: { id } });
     await audit({ userId: session.user.id, action: "campaign_delete", entityType: "Campaign", entityId: id });
     return NextResponse.json({ ok: true, deleted: true });

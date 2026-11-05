@@ -7,6 +7,7 @@ import {
   normalizeEmail,
   normalizeKey,
   normalizeWhitespace,
+  likeTerm,
   parseDate,
   parseInteger,
   parseNumber,
@@ -17,6 +18,15 @@ function str(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   const text = normalizeWhitespace(String(value));
   return text || null;
+}
+
+async function findProductByName(name: string) {
+  const rows = await prisma.product.findMany({
+    where: { name: { contains: likeTerm(name) } },
+    select: { id: true, name: true },
+    take: 20,
+  });
+  return rows.find((row) => row.name.toLowerCase() === name.toLowerCase()) ?? null;
 }
 
 function rowHash(parts: Array<string | number | null | undefined>): string {
@@ -103,36 +113,40 @@ export async function importOrders(importJobId: string, rows: ParsedRow[], mappi
         (sku
           ? await prisma.product.findFirst({ where: { skuNormalized: normalizeKey(sku) } })
           : null) ??
-        (await prisma.product.findFirst({
-          where: { name: { equals: productNameRaw } },
-        }));
+        (await findProductByName(productNameRaw));
 
       const orderDate = parseDate(mapped.order_date);
-      const order = await prisma.order.create({
-        data: {
-          externalId: str(mapped.order_id),
-          customerId: customer.id,
-          orderDate,
-          orderTotal: parseNumber(mapped.order_total) ?? undefined,
-          sourceRowHash: hash,
-          importJobId,
-          originalData: rows[i] as object,
-          items: {
-            create: {
-              productId: product?.id,
-              sku,
-              productName: productNameRaw,
-              productNameRaw,
-              quantity: parseInteger(mapped.quantity) ?? 1,
-              unitPrice: parseNumber(mapped.unit_price) ?? undefined,
-              lineTotal: parseNumber(mapped.order_total) ?? parseNumber(mapped.unit_price) ?? undefined,
-              productUrl: str(mapped.product_url),
-              category: str(mapped.category),
-            },
+      const externalId = str(mapped.order_id);
+      const itemData = {
+        productId: product?.id,
+        sku,
+        productName: productNameRaw,
+        productNameRaw,
+        quantity: parseInteger(mapped.quantity) ?? 1,
+        unitPrice: parseNumber(mapped.unit_price) ?? undefined,
+        lineTotal: parseNumber(mapped.line_total) ?? parseNumber(mapped.unit_price) ?? undefined,
+        productUrl: str(mapped.product_url),
+        category: str(mapped.category),
+      };
+      const existingOrder = externalId
+        ? await prisma.order.findFirst({ where: { externalId }, select: { id: true } })
+        : null;
+      if (existingOrder) {
+        await prisma.orderItem.create({ data: { orderId: existingOrder.id, ...itemData } });
+      } else {
+        await prisma.order.create({
+          data: {
+            externalId,
+            customerId: customer.id,
+            orderDate,
+            orderTotal: parseNumber(mapped.order_total) ?? undefined,
+            sourceRowHash: hash,
+            importJobId,
+            originalData: rows[i] as object,
+            items: { create: itemData },
           },
-        },
-      });
-      void order;
+        });
+      }
       valid += 1;
     } catch (error) {
       errors += 1;
@@ -283,7 +297,15 @@ export async function importCatalogue(importJobId: string, rows: ParsedRow[], ma
 
       if (existing) {
         duplicates += 1;
-        await prisma.product.update({ where: { id: existing.id }, data });
+        const update = Object.fromEntries(
+          Object.entries(data).filter(([key, value]) => {
+            if (key === "importJobId" || key === "originalData") return true;
+            if (value == null || value === "") return false;
+            if (Array.isArray(value) && value.length === 0) return false;
+            return true;
+          }),
+        );
+        await prisma.product.update({ where: { id: existing.id }, data: update });
       } else {
         await prisma.product.create({ data });
       }

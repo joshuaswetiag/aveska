@@ -1,8 +1,8 @@
 import { prisma } from "@/lib/db";
-import { normalizeKey } from "@/lib/utils";
+import { likeTerm, normalizeKey } from "@/lib/utils";
 
 export async function globalSearch(query: string) {
-  const q = query.trim();
+  const q = likeTerm(query);
   if (q.length < 1) return { customers: [], products: [], vehicles: [], campaigns: [] };
   const contains = { contains: q };
   const seriesUpper = q.toUpperCase();

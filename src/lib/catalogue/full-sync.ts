@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { syncNetoCatalogue } from "@/lib/catalogue/neto";
 import { syncNetoOrders } from "@/lib/catalogue/neto-orders";
-import { extractCatalogueFitments, harvestVehiclesFromOrderLines } from "@/lib/vehicle/persist";
+import { extractCatalogueFitments, extractCatalogueFitmentChunk, harvestVehiclesFromOrderLines, linkOrderVehiclesChunk } from "@/lib/vehicle/persist";
 
 /** Default order history window for first-load sync (override with NETO_ORDERS_FROM). */
 function defaultOrdersFrom() {
@@ -18,9 +18,12 @@ export type FullSyncPayload = {
   kind: "full";
   from?: string;
   to?: string;
-  phase?: "products" | "orders" | "done";
+  phase?: "products" | "orders" | "vehicles" | "links" | "recommendations" | "done";
+  recommendationCursor?: string | null;
   productPage?: number;
   orderPage?: number;
+  fitmentCursor?: string | null;
+  linkCursor?: string | null;
   importedProducts?: number;
   importedOrders?: number;
   productTotal?: number;
@@ -196,7 +199,53 @@ export async function advanceFullSync(
       if (!chunk.done) {
         return { done: false, payload: state, result: chunk };
       }
-      state.phase = "done";
+      state.phase = "vehicles";
+      state.fitmentCursor = null;
+  }
+
+  if (state.phase === "vehicles" && remaining() > 2_000) {
+    while (remaining() > 2_000) {
+      const chunk = await extractCatalogueFitmentChunk(state.fitmentCursor, 30);
+      state.fitmentCursor = chunk.nextCursor;
+      await onProgress?.(82, 100, "Matching vehicles from products");
+      await persist?.(state);
+      if (chunk.done || chunk.count === 0) {
+        state.phase = "links";
+        state.linkCursor = null;
+        break;
+      }
+    }
+    if (state.phase === "vehicles") return { done: false, payload: state, result: { phase: "vehicles" } };
+  }
+
+  if (state.phase === "links" && remaining() > 2_000) {
+    while (remaining() > 2_000) {
+      const chunk = await linkOrderVehiclesChunk(state.linkCursor, 60);
+      state.linkCursor = chunk.nextCursor;
+      await onProgress?.(92, 100, "Linking customers to vehicles");
+      await persist?.(state);
+      if (chunk.done || chunk.count === 0) {
+        state.phase = "recommendations";
+        state.recommendationCursor = null;
+        break;
+      }
+    }
+    if (state.phase === "links") return { done: false, payload: state, result: { phase: "links" } };
+  }
+
+  if (state.phase === "recommendations" && remaining() > 2_000) {
+    const { generateRecommendations } = await import("@/lib/recommendation/generate");
+    const pass = await generateRecommendations({
+      resume: true,
+      skipSegments: true,
+      maxCustomers: 20,
+      cursor: state.recommendationCursor,
+    });
+    state.recommendationCursor = pass.cursor;
+    await onProgress?.(96, 100, "Building recommendations");
+    await persist?.(state);
+    if (!pass.finished) return { done: false, payload: state, result: { phase: "recommendations" } };
+    state.phase = "done";
   }
 
   if (state.phase === "done") {
@@ -260,6 +309,16 @@ export async function ensureFullSyncQueued(createdById?: string, force = false) 
     });
   }
   if (activeJobs[0]) return activeJobs[0];
+  const failed = fullJobs.find((job) => job.status === "FAILED");
+  if (failed && !force) {
+    const attempts = Number((failed.payload as { attempts?: number } | null)?.attempts ?? 0);
+    if (attempts >= 5) return failed;
+    await prisma.job.update({
+      where: { id: failed.id },
+      data: { status: "QUEUED", errorMessage: null, message: "Resuming sync…" },
+    });
+    return failed;
+  }
   const [products, orders] = await Promise.all([prisma.product.count(), prisma.order.count()]);
   const completed = fullJobs.find((job) => job.status === "COMPLETED");
   if (!force && products > 0 && orders > 0) return completed ?? null;
@@ -267,7 +326,13 @@ export async function ensureFullSyncQueued(createdById?: string, force = false) 
     type: "NETO_SYNC",
     payload: {
       kind: "full",
-      from: FULL_SYNC_FROM,
+      from: isWorkerRuntime() && !process.env.NETO_ORDERS_FROM?.trim()
+        ? (() => {
+            const date = new Date();
+            date.setMonth(date.getMonth() - 18);
+            return date.toISOString().slice(0, 10);
+          })()
+        : FULL_SYNC_FROM,
       to: storeIsoDate(),
       phase: "products",
       productPage: 0,
