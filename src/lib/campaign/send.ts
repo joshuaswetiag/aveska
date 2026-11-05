@@ -100,7 +100,9 @@ export async function sendCampaign(
   );
 
   if (!candidates.length) {
-    throw new Error("No unsent recipients with a valid email. Suppressed and already-sent people are skipped.");
+    throw new Error(
+      "No unsent recipients with a valid email. Suppressed, already-sent, and eBay (@members.ebay.com) addresses are skipped.",
+    );
   }
 
   await prisma.campaign.update({ where: { id: campaignId }, data: { status: "SENDING" } });

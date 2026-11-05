@@ -2,6 +2,7 @@ import { NextResponse } from "@/server/next-response";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
 import { audit } from "@/lib/audit";
+import { pushJsonArray } from "@/lib/json-array";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -22,7 +23,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     });
     await prisma.customerVehicle.update({
       where: { id: to.id },
-      data: { mergedFromIds: { push: from.vehicleId } },
+      data: { mergedFromIds: pushJsonArray(to.mergedFromIds, from.vehicleId) },
     });
     await prisma.customerVehicle.delete({ where: { id: from.id } });
     await audit({ userId: session.user.id, action: "vehicle_merge", entityType: "Customer", entityId: id });

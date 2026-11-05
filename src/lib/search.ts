@@ -4,7 +4,7 @@ import { normalizeKey } from "@/lib/utils";
 export async function globalSearch(query: string) {
   const q = query.trim();
   if (q.length < 1) return { customers: [], products: [], vehicles: [], campaigns: [] };
-  const contains = { contains: q, mode: "insensitive" as const };
+  const contains = { contains: q };
   const seriesUpper = q.toUpperCase();
 
   const [customers, products, vehicles, campaigns] = await Promise.all([
@@ -20,7 +20,7 @@ export async function globalSearch(query: string) {
           { name: contains },
           { sku: contains },
           { searchableText: contains },
-          { series: { has: seriesUpper } },
+          { searchableText: { contains: seriesUpper } },
         ],
       },
       take: 8,
@@ -33,7 +33,7 @@ export async function globalSearch(query: string) {
           { model: contains },
           { vehicleFamily: contains },
           { searchableText: contains },
-          { series: { has: seriesUpper } },
+          { searchableText: { contains: seriesUpper } },
           { aliases: { some: { aliasNormalized: { contains: normalizeKey(q) } } } },
         ],
       },

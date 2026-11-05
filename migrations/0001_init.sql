@@ -1,55 +1,17 @@
--- CreateSchema
-CREATE SCHEMA IF NOT EXISTS "public";
-
--- CreateEnum
-CREATE TYPE "Role" AS ENUM ('ADMIN', 'MARKETING', 'READONLY');
-
--- CreateEnum
-CREATE TYPE "ImportType" AS ENUM ('ORDERS', 'CATALOGUE', 'SUPPRESSION', 'VEHICLE_ALIASES');
-
--- CreateEnum
-CREATE TYPE "ImportStatus" AS ENUM ('PENDING', 'VALIDATING', 'MAPPING', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELLED');
-
--- CreateEnum
-CREATE TYPE "JobType" AS ENUM ('IMPORT', 'EXTRACT_VEHICLES', 'GENERATE_RECOMMENDATIONS', 'GENERATE_CAMPAIGN', 'SEGMENT_CUSTOMERS', 'ANALYSE_CUSTOMERS', 'DEMO');
-
--- CreateEnum
-CREATE TYPE "JobStatus" AS ENUM ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED');
-
--- CreateEnum
-CREATE TYPE "StockStatus" AS ENUM ('IN_STOCK', 'OUT_OF_STOCK', 'UNKNOWN', 'DISCONTINUED');
-
--- CreateEnum
-CREATE TYPE "RecommendationStatus" AS ENUM ('GENERATED', 'NEEDS_REVIEW', 'APPROVED', 'REJECTED', 'INCORRECT_FITMENT', 'NOT_RELEVANT', 'ALREADY_PURCHASED', 'EXCELLENT_MATCH');
-
--- CreateEnum
-CREATE TYPE "CampaignType" AS ENUM ('CROSS_SELL', 'VEHICLE_RESTORATION', 'RELATED_PRODUCTS', 'RE_ENGAGEMENT', 'NEW_PRODUCT', 'CATEGORY_PROMOTION', 'SEASONAL', 'CLEARANCE', 'BACK_IN_STOCK', 'NEWSLETTER');
-
--- CreateEnum
-CREATE TYPE "CampaignStatus" AS ENUM ('DRAFT', 'GENERATED', 'IN_REVIEW', 'APPROVED', 'EXPORTED', 'ARCHIVED');
-
--- CreateEnum
-CREATE TYPE "SuppressionReason" AS ENUM ('UNSUBSCRIBED', 'BOUNCED', 'INVALID', 'DO_NOT_CONTACT');
-
--- CreateEnum
-CREATE TYPE "MatchLevel" AS ENUM ('EXACT', 'SAME_SERIES', 'SAME_FAMILY', 'RELATED_APPLICATION', 'INSUFFICIENT_DATA');
-
 -- CreateTable
 CREATE TABLE "User" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "email" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "passwordHash" TEXT NOT NULL,
-    "role" "Role" NOT NULL DEFAULT 'READONLY',
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+    "role" TEXT NOT NULL DEFAULT 'READONLY',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
 );
 
 -- CreateTable
 CREATE TABLE "Customer" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "externalId" TEXT,
     "name" TEXT NOT NULL,
     "email" TEXT,
@@ -58,62 +20,59 @@ CREATE TABLE "Customer" (
     "firstName" TEXT,
     "lastName" TEXT,
     "totalOrders" INTEGER NOT NULL DEFAULT 0,
-    "totalSpend" DECIMAL(12,2) NOT NULL DEFAULT 0,
-    "averageOrderValue" DECIMAL(12,2) NOT NULL DEFAULT 0,
-    "firstPurchaseAt" TIMESTAMP(3),
-    "lastPurchaseAt" TIMESTAMP(3),
+    "totalSpend" DECIMAL NOT NULL DEFAULT 0,
+    "averageOrderValue" DECIMAL NOT NULL DEFAULT 0,
+    "firstPurchaseAt" DATETIME,
+    "lastPurchaseAt" DATETIME,
     "productCount" INTEGER NOT NULL DEFAULT 0,
     "vehicleCount" INTEGER NOT NULL DEFAULT 0,
     "mainVehicleId" TEXT,
     "mainCategory" TEXT,
     "isSuppressed" BOOLEAN NOT NULL DEFAULT false,
     "originalData" JSONB,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Customer_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
 );
 
 -- CreateTable
 CREATE TABLE "Order" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "externalId" TEXT,
     "customerId" TEXT NOT NULL,
-    "orderDate" TIMESTAMP(3),
-    "orderTotal" DECIMAL(12,2),
+    "orderDate" DATETIME,
+    "orderTotal" DECIMAL,
     "sourceRowHash" TEXT,
     "importJobId" TEXT,
     "originalData" JSONB,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Order_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Order_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "OrderItem" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "orderId" TEXT NOT NULL,
     "productId" TEXT,
     "sku" TEXT,
     "productName" TEXT NOT NULL,
     "productNameRaw" TEXT NOT NULL,
     "quantity" INTEGER NOT NULL DEFAULT 1,
-    "unitPrice" DECIMAL(12,2),
-    "lineTotal" DECIMAL(12,2),
+    "unitPrice" DECIMAL,
+    "lineTotal" DECIMAL,
     "productUrl" TEXT,
     "category" TEXT,
     "extractedVehicle" JSONB,
-    "extractionConfidence" DECIMAL(5,4),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "OrderItem_pkey" PRIMARY KEY ("id")
+    "extractionConfidence" DECIMAL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "OrderItem_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "OrderItem_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Product" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "sku" TEXT,
     "skuNormalized" TEXT,
     "externalId" TEXT,
@@ -126,37 +85,35 @@ CREATE TABLE "Product" (
     "category" TEXT,
     "subcategory" TEXT,
     "brand" TEXT,
-    "price" DECIMAL(12,2),
+    "price" DECIMAL,
     "stock" INTEGER,
-    "stockStatus" "StockStatus" NOT NULL DEFAULT 'UNKNOWN',
+    "stockStatus" TEXT NOT NULL DEFAULT 'UNKNOWN',
     "make" TEXT,
     "model" TEXT,
     "vehicleFamily" TEXT,
-    "series" TEXT[] DEFAULT ARRAY[]::TEXT[],
+    "series" JSONB NOT NULL DEFAULT [],
     "bodyType" TEXT,
     "yearFrom" INTEGER,
     "yearTo" INTEGER,
     "engine" TEXT,
     "fitment" TEXT,
-    "aliases" TEXT[] DEFAULT ARRAY[]::TEXT[],
+    "aliases" JSONB NOT NULL DEFAULT [],
     "searchableText" TEXT,
-    "tags" TEXT[] DEFAULT ARRAY[]::TEXT[],
+    "tags" JSONB NOT NULL DEFAULT [],
     "discontinued" BOOLEAN NOT NULL DEFAULT false,
     "originalData" JSONB,
     "importJobId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Product_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
 );
 
 -- CreateTable
 CREATE TABLE "Vehicle" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "make" TEXT NOT NULL,
     "model" TEXT,
     "vehicleFamily" TEXT,
-    "series" TEXT[] DEFAULT ARRAY[]::TEXT[],
+    "series" JSONB NOT NULL DEFAULT [],
     "generation" TEXT,
     "bodyType" TEXT,
     "yearFrom" INTEGER,
@@ -168,135 +125,132 @@ CREATE TABLE "Vehicle" (
     "application" TEXT,
     "canonicalName" TEXT NOT NULL,
     "searchableText" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Vehicle_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
 );
 
 -- CreateTable
 CREATE TABLE "VehicleAlias" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "vehicleId" TEXT NOT NULL,
     "alias" TEXT NOT NULL,
     "aliasNormalized" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "VehicleAlias_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "VehicleAlias_vehicleId_fkey" FOREIGN KEY ("vehicleId") REFERENCES "Vehicle" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "ProductFitment" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "productId" TEXT NOT NULL,
     "vehicleId" TEXT NOT NULL,
     "source" TEXT NOT NULL,
-    "confidence" DECIMAL(5,4) NOT NULL,
-    "matchLevel" "MatchLevel" NOT NULL,
+    "confidence" DECIMAL NOT NULL,
+    "matchLevel" TEXT NOT NULL,
     "notes" TEXT,
     "isNegative" BOOLEAN NOT NULL DEFAULT false,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "ProductFitment_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "ProductFitment_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "ProductFitment_vehicleId_fkey" FOREIGN KEY ("vehicleId") REFERENCES "Vehicle" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "FitmentOverride" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "productId" TEXT NOT NULL,
     "make" TEXT,
     "model" TEXT,
-    "series" TEXT[] DEFAULT ARRAY[]::TEXT[],
+    "series" JSONB NOT NULL DEFAULT [],
     "vehicleFamily" TEXT,
     "bodyType" TEXT,
     "isCompatible" BOOLEAN NOT NULL,
     "notes" TEXT,
     "createdById" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "FitmentOverride_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "FitmentOverride_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "CustomerVehicle" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "customerId" TEXT NOT NULL,
     "vehicleId" TEXT NOT NULL,
-    "confidence" DECIMAL(5,4) NOT NULL,
+    "confidence" DECIMAL NOT NULL,
     "source" TEXT NOT NULL,
     "isPrimary" BOOLEAN NOT NULL DEFAULT false,
-    "mergedFromIds" TEXT[] DEFAULT ARRAY[]::TEXT[],
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "CustomerVehicle_pkey" PRIMARY KEY ("id")
+    "mergedFromIds" JSONB NOT NULL DEFAULT [],
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "CustomerVehicle_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "CustomerVehicle_vehicleId_fkey" FOREIGN KEY ("vehicleId") REFERENCES "Vehicle" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Recommendation" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "customerId" TEXT NOT NULL,
     "vehicleId" TEXT NOT NULL,
     "customerVehicleId" TEXT,
     "productId" TEXT NOT NULL,
     "purchasedProductId" TEXT,
-    "score" DECIMAL(5,2) NOT NULL,
-    "scoreRaw" DECIMAL(8,2) NOT NULL,
-    "matchLevel" "MatchLevel" NOT NULL,
-    "confidence" DECIMAL(5,4) NOT NULL,
-    "status" "RecommendationStatus" NOT NULL DEFAULT 'GENERATED',
+    "score" DECIMAL NOT NULL,
+    "scoreRaw" DECIMAL NOT NULL,
+    "matchLevel" TEXT NOT NULL,
+    "confidence" DECIMAL NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'GENERATED',
     "feedbackNote" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Recommendation_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Recommendation_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "Recommendation_vehicleId_fkey" FOREIGN KEY ("vehicleId") REFERENCES "Vehicle" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "Recommendation_customerVehicleId_fkey" FOREIGN KEY ("customerVehicleId") REFERENCES "CustomerVehicle" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "Recommendation_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "RecommendationReason" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "recommendationId" TEXT NOT NULL,
     "code" TEXT NOT NULL,
     "label" TEXT NOT NULL,
     "points" INTEGER NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "RecommendationReason_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "RecommendationReason_recommendationId_fkey" FOREIGN KEY ("recommendationId") REFERENCES "Recommendation" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Segment" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "slug" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "type" TEXT NOT NULL,
     "description" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Segment_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
 );
 
 -- CreateTable
 CREATE TABLE "CustomerSegment" (
     "customerId" TEXT NOT NULL,
     "segmentId" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "CustomerSegment_pkey" PRIMARY KEY ("customerId","segmentId")
+    PRIMARY KEY ("customerId", "segmentId"),
+    CONSTRAINT "CustomerSegment_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "CustomerSegment_segmentId_fkey" FOREIGN KEY ("segmentId") REFERENCES "Segment" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Campaign" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "name" TEXT NOT NULL,
     "slug" TEXT NOT NULL,
-    "type" "CampaignType" NOT NULL DEFAULT 'CROSS_SELL',
-    "status" "CampaignStatus" NOT NULL DEFAULT 'DRAFT',
+    "type" TEXT NOT NULL DEFAULT 'CROSS_SELL',
+    "status" TEXT NOT NULL DEFAULT 'DRAFT',
     "targetSegmentId" TEXT,
     "vehicleFilter" TEXT,
     "subject" TEXT,
@@ -310,9 +264,10 @@ CREATE TABLE "Campaign" (
     "trackingEnabled" BOOLEAN NOT NULL DEFAULT true,
     "utmSource" TEXT NOT NULL DEFAULT 'email',
     "utmMedium" TEXT NOT NULL DEFAULT 'email',
-    "approvedAt" TIMESTAMP(3),
+    "approvedAt" DATETIME,
     "approvedById" TEXT,
-    "exportedAt" TIMESTAMP(3),
+    "exportedAt" DATETIME,
+    "sentAt" DATETIME,
     "sent" INTEGER NOT NULL DEFAULT 0,
     "delivered" INTEGER NOT NULL DEFAULT 0,
     "opened" INTEGER NOT NULL DEFAULT 0,
@@ -320,16 +275,14 @@ CREATE TABLE "Campaign" (
     "bounced" INTEGER NOT NULL DEFAULT 0,
     "unsubscribed" INTEGER NOT NULL DEFAULT 0,
     "converted" INTEGER NOT NULL DEFAULT 0,
-    "revenue" DECIMAL(12,2) NOT NULL DEFAULT 0,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Campaign_pkey" PRIMARY KEY ("id")
+    "revenue" DECIMAL NOT NULL DEFAULT 0,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
 );
 
 -- CreateTable
 CREATE TABLE "CampaignRecipient" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "campaignId" TEXT NOT NULL,
     "customerId" TEXT NOT NULL,
     "vehicleLabel" TEXT,
@@ -339,69 +292,86 @@ CREATE TABLE "CampaignRecipient" (
     "bodyHtml" TEXT,
     "personalized" JSONB,
     "sent" BOOLEAN NOT NULL DEFAULT false,
+    "sentAt" DATETIME,
+    "sendError" TEXT,
+    "providerMessageId" TEXT,
     "delivered" BOOLEAN NOT NULL DEFAULT false,
     "opened" BOOLEAN NOT NULL DEFAULT false,
+    "openedAt" DATETIME,
     "clicked" BOOLEAN NOT NULL DEFAULT false,
+    "clickedAt" DATETIME,
     "bounced" BOOLEAN NOT NULL DEFAULT false,
     "unsubscribed" BOOLEAN NOT NULL DEFAULT false,
     "converted" BOOLEAN NOT NULL DEFAULT false,
-    "revenue" DECIMAL(12,2) NOT NULL DEFAULT 0,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "revenue" DECIMAL NOT NULL DEFAULT 0,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "CampaignRecipient_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "CampaignRecipient_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
 
-    CONSTRAINT "CampaignRecipient_pkey" PRIMARY KEY ("id")
+-- CreateTable
+CREATE TABLE "CampaignTraffic" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "campaignId" TEXT NOT NULL,
+    "recipientId" TEXT NOT NULL,
+    "customerId" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "url" TEXT,
+    "label" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "CampaignTraffic_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "CampaignTraffic_recipientId_fkey" FOREIGN KEY ("recipientId") REFERENCES "CampaignRecipient" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "CampaignTraffic_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "CampaignProduct" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "campaignId" TEXT NOT NULL,
     "productId" TEXT NOT NULL,
     "recommendationId" TEXT,
     "sortOrder" INTEGER NOT NULL DEFAULT 0,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "CampaignProduct_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "CampaignProduct_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "CampaignProduct_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "CampaignProduct_recommendationId_fkey" FOREIGN KEY ("recommendationId") REFERENCES "Recommendation" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "EmailTemplate" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "name" TEXT NOT NULL,
     "slug" TEXT NOT NULL,
-    "type" "CampaignType" NOT NULL,
+    "type" TEXT NOT NULL,
     "subject" TEXT NOT NULL,
     "preheader" TEXT,
     "bodyHtml" TEXT NOT NULL,
     "ctaLabel" TEXT,
     "ctaUrl" TEXT,
     "isDefault" BOOLEAN NOT NULL DEFAULT false,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "EmailTemplate_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
 );
 
 -- CreateTable
 CREATE TABLE "Suppression" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "email" TEXT NOT NULL,
     "emailNormalized" TEXT NOT NULL,
-    "reason" "SuppressionReason" NOT NULL,
+    "reason" TEXT NOT NULL,
     "source" TEXT,
     "notes" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Suppression_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
 );
 
 -- CreateTable
 CREATE TABLE "ImportJob" (
-    "id" TEXT NOT NULL,
-    "type" "ImportType" NOT NULL,
-    "status" "ImportStatus" NOT NULL DEFAULT 'PENDING',
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "type" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
     "fileName" TEXT NOT NULL,
     "filePath" TEXT,
     "fileSize" INTEGER,
@@ -418,30 +388,27 @@ CREATE TABLE "ImportJob" (
     "summary" JSONB,
     "errorMessage" TEXT,
     "createdById" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "ImportJob_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
 );
 
 -- CreateTable
 CREATE TABLE "ImportRowError" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "importJobId" TEXT NOT NULL,
     "rowNumber" INTEGER NOT NULL,
     "field" TEXT,
     "message" TEXT NOT NULL,
     "rawData" JSONB,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "ImportRowError_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "ImportRowError_importJobId_fkey" FOREIGN KEY ("importJobId") REFERENCES "ImportJob" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Job" (
-    "id" TEXT NOT NULL,
-    "type" "JobType" NOT NULL,
-    "status" "JobStatus" NOT NULL DEFAULT 'QUEUED',
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "type" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'QUEUED',
     "progress" INTEGER NOT NULL DEFAULT 0,
     "total" INTEGER NOT NULL DEFAULT 0,
     "message" TEXT,
@@ -449,49 +416,57 @@ CREATE TABLE "Job" (
     "result" JSONB,
     "errorMessage" TEXT,
     "importJobId" TEXT,
-    "startedAt" TIMESTAMP(3),
-    "completedAt" TIMESTAMP(3),
+    "startedAt" DATETIME,
+    "completedAt" DATETIME,
     "createdById" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Job_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Job_importJobId_fkey" FOREIGN KEY ("importJobId") REFERENCES "ImportJob" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "AuditLog" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "userId" TEXT,
     "action" TEXT NOT NULL,
     "entityType" TEXT NOT NULL,
     "entityId" TEXT,
     "metadata" JSONB,
     "ipAddress" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "AuditLog_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "AuditLog_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Settings" (
-    "id" TEXT NOT NULL DEFAULT 'default',
+    "id" TEXT NOT NULL PRIMARY KEY DEFAULT 'default',
     "cooldownDays" INTEGER NOT NULL DEFAULT 90,
-    "confidenceThreshold" DECIMAL(5,4) NOT NULL DEFAULT 0.85,
+    "confidenceThreshold" DECIMAL NOT NULL DEFAULT 0.85,
     "includeOutOfStock" BOOLEAN NOT NULL DEFAULT false,
     "utmEnabled" BOOLEAN NOT NULL DEFAULT true,
     "shopUrl" TEXT,
     "contactUrl" TEXT,
     "fromName" TEXT NOT NULL DEFAULT 'Aveska',
+    "fromEmail" TEXT,
     "replyTo" TEXT,
+    "emailProvider" TEXT,
+    "smtpHost" TEXT,
+    "smtpPort" INTEGER,
+    "smtpSecure" BOOLEAN NOT NULL DEFAULT false,
+    "smtpUser" TEXT,
+    "smtpPassword" TEXT,
+    "emailSendDelayMs" INTEGER NOT NULL DEFAULT 200,
+    "maropostAccountId" TEXT,
+    "maropostApiKey" TEXT,
+    "maropostCampaignName" TEXT,
     "companyName" TEXT NOT NULL DEFAULT 'Aveska',
     "logoUrl" TEXT,
+    "trackingUrl" TEXT,
     "aiProvider" TEXT,
     "aiModel" TEXT,
     "reduceScoreSameFamily" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Settings_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
 );
 
 -- CreateIndex
@@ -657,6 +632,15 @@ CREATE INDEX "CampaignRecipient_customerId_idx" ON "CampaignRecipient"("customer
 CREATE UNIQUE INDEX "CampaignRecipient_campaignId_customerId_key" ON "CampaignRecipient"("campaignId", "customerId");
 
 -- CreateIndex
+CREATE INDEX "CampaignTraffic_campaignId_createdAt_idx" ON "CampaignTraffic"("campaignId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "CampaignTraffic_customerId_idx" ON "CampaignTraffic"("customerId");
+
+-- CreateIndex
+CREATE INDEX "CampaignTraffic_createdAt_idx" ON "CampaignTraffic"("createdAt");
+
+-- CreateIndex
 CREATE INDEX "CampaignProduct_campaignId_idx" ON "CampaignProduct"("campaignId");
 
 -- CreateIndex
@@ -694,76 +678,3 @@ CREATE INDEX "AuditLog_userId_idx" ON "AuditLog"("userId");
 
 -- CreateIndex
 CREATE INDEX "AuditLog_createdAt_idx" ON "AuditLog"("createdAt");
-
--- AddForeignKey
-ALTER TABLE "Order" ADD CONSTRAINT "Order_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "OrderItem" ADD CONSTRAINT "OrderItem_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "OrderItem" ADD CONSTRAINT "OrderItem_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "VehicleAlias" ADD CONSTRAINT "VehicleAlias_vehicleId_fkey" FOREIGN KEY ("vehicleId") REFERENCES "Vehicle"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ProductFitment" ADD CONSTRAINT "ProductFitment_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ProductFitment" ADD CONSTRAINT "ProductFitment_vehicleId_fkey" FOREIGN KEY ("vehicleId") REFERENCES "Vehicle"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "FitmentOverride" ADD CONSTRAINT "FitmentOverride_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CustomerVehicle" ADD CONSTRAINT "CustomerVehicle_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CustomerVehicle" ADD CONSTRAINT "CustomerVehicle_vehicleId_fkey" FOREIGN KEY ("vehicleId") REFERENCES "Vehicle"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Recommendation" ADD CONSTRAINT "Recommendation_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Recommendation" ADD CONSTRAINT "Recommendation_vehicleId_fkey" FOREIGN KEY ("vehicleId") REFERENCES "Vehicle"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Recommendation" ADD CONSTRAINT "Recommendation_customerVehicleId_fkey" FOREIGN KEY ("customerVehicleId") REFERENCES "CustomerVehicle"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Recommendation" ADD CONSTRAINT "Recommendation_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "RecommendationReason" ADD CONSTRAINT "RecommendationReason_recommendationId_fkey" FOREIGN KEY ("recommendationId") REFERENCES "Recommendation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CustomerSegment" ADD CONSTRAINT "CustomerSegment_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CustomerSegment" ADD CONSTRAINT "CustomerSegment_segmentId_fkey" FOREIGN KEY ("segmentId") REFERENCES "Segment"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CampaignRecipient" ADD CONSTRAINT "CampaignRecipient_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CampaignRecipient" ADD CONSTRAINT "CampaignRecipient_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CampaignProduct" ADD CONSTRAINT "CampaignProduct_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "Campaign"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CampaignProduct" ADD CONSTRAINT "CampaignProduct_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CampaignProduct" ADD CONSTRAINT "CampaignProduct_recommendationId_fkey" FOREIGN KEY ("recommendationId") REFERENCES "Recommendation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ImportRowError" ADD CONSTRAINT "ImportRowError_importJobId_fkey" FOREIGN KEY ("importJobId") REFERENCES "ImportJob"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Job" ADD CONSTRAINT "Job_importJobId_fkey" FOREIGN KEY ("importJobId") REFERENCES "ImportJob"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-

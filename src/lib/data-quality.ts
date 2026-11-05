@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { asStringArray } from "@/lib/json-array";
 import { formatPercent } from "@/lib/utils";
 
 export type QualitySample = {
@@ -15,177 +16,115 @@ export type QualityCard = {
   samples: QualitySample[];
 };
 
-type CountRow = { count: number };
-type VehicleRow = {
-  total: number;
-  not_processed: number;
-  identified: number;
-  high_confidence: number;
-  low_confidence: number;
-  no_vehicle: number;
+type ExtractedVehicle = {
+  make?: string | null;
+  model?: string | null;
+  vehicleFamily?: string | null;
+  series?: unknown;
+  application?: string | null;
 };
-type SampleRow = { productName: string; vehicle: string | null; confidence: number | null };
-type DupRow = { key: string; count: number };
 
-function n(value: unknown) {
-  return Number(value ?? 0);
+function hasVehicleSignal(extracted: ExtractedVehicle | null | undefined) {
+  if (!extracted) return false;
+  const make = (extracted.make ?? "").trim();
+  if (!make) return false;
+  return (
+    asStringArray(extracted.series).length > 0 ||
+    Boolean((extracted.vehicleFamily ?? "").trim()) ||
+    Boolean((extracted.model ?? "").trim())
+  );
+}
+
+function isNoVehicle(extracted: ExtractedVehicle | null | undefined) {
+  if (!extracted) return true;
+  const make = (extracted.make ?? "").trim();
+  if (!make) return true;
+  return (
+    asStringArray(extracted.series).length === 0 &&
+    !(extracted.vehicleFamily ?? "").trim() &&
+    !(extracted.model ?? "").trim()
+  );
 }
 
 export async function getDataQuality(): Promise<{
   cards: QualityCard[];
   totals: { customers: number; orderLines: number; products: number; vehicles: number };
 }> {
-  const [customers, orderLines, products, vehicles] = await Promise.all([
-    prisma.customer.count(),
-    prisma.orderItem.count(),
-    prisma.product.count(),
-    prisma.vehicle.count(),
-  ]);
+  const [customers, orderLines, products, vehicles, orderItems, missingEmail, customersWithoutVehicle, missingProductName] =
+    await Promise.all([
+      prisma.customer.count(),
+      prisma.orderItem.count(),
+      prisma.product.count(),
+      prisma.vehicle.count(),
+      prisma.orderItem.findMany({
+        select: { productName: true, extractedVehicle: true, extractionConfidence: true, createdAt: true },
+      }),
+      prisma.customer.count({
+        where: { OR: [{ email: null }, { emailNormalized: null }, { email: "" }] },
+      }),
+      prisma.customer.count({ where: { vehicles: { none: {} } } }),
+      prisma.orderItem.count({ where: { productName: "" } }),
+    ]);
 
-  const [vehicleStats] = await prisma.$queryRaw<VehicleRow[]>`
-    SELECT
-      COUNT(*)::int AS total,
-      COUNT(*) FILTER (WHERE "extractedVehicle" IS NULL)::int AS not_processed,
-      COUNT(*) FILTER (
-        WHERE COALESCE("extractedVehicle"->>'make', '') <> ''
-          AND (
-            (
-              jsonb_typeof("extractedVehicle"->'series') = 'array'
-              AND jsonb_array_length("extractedVehicle"->'series') > 0
-            )
-            OR COALESCE("extractedVehicle"->>'vehicleFamily', '') <> ''
-            OR COALESCE("extractedVehicle"->>'model', '') <> ''
-          )
-      )::int AS identified,
-      COUNT(*) FILTER (
-        WHERE COALESCE("extractedVehicle"->>'make', '') <> ''
-          AND (
-            (
-              jsonb_typeof("extractedVehicle"->'series') = 'array'
-              AND jsonb_array_length("extractedVehicle"->'series') > 0
-            )
-            OR COALESCE("extractedVehicle"->>'vehicleFamily', '') <> ''
-            OR COALESCE("extractedVehicle"->>'model', '') <> ''
-          )
-          AND COALESCE("extractionConfidence", 0) >= 0.85
-      )::int AS high_confidence,
-      COUNT(*) FILTER (
-        WHERE COALESCE("extractedVehicle"->>'make', '') <> ''
-          AND (
-            (
-              jsonb_typeof("extractedVehicle"->'series') = 'array'
-              AND jsonb_array_length("extractedVehicle"->'series') > 0
-            )
-            OR COALESCE("extractedVehicle"->>'vehicleFamily', '') <> ''
-            OR COALESCE("extractedVehicle"->>'model', '') <> ''
-          )
-          AND COALESCE("extractionConfidence", 0) < 0.85
-      )::int AS low_confidence,
-      COUNT(*) FILTER (
-        WHERE "extractedVehicle" IS NOT NULL
-          AND (
-            COALESCE("extractedVehicle"->>'make', '') = ''
-            OR (
-              NOT (
-                jsonb_typeof("extractedVehicle"->'series') = 'array'
-                AND jsonb_array_length("extractedVehicle"->'series') > 0
-              )
-              AND COALESCE("extractedVehicle"->>'vehicleFamily', '') = ''
-              AND COALESCE("extractedVehicle"->>'model', '') = ''
-            )
-          )
-      )::int AS no_vehicle
-    FROM "OrderItem"
-  `;
+  let notProcessed = 0;
+  let identified = 0;
+  let highConfidence = 0;
+  let lowConfidence = 0;
+  let noVehicle = 0;
+  const noVehicleSamples: Array<{ productName: string; vehicle: string | null; confidence: number | null }> = [];
+  const lowConfidenceSamples: Array<{ productName: string; vehicle: string | null; confidence: number | null }> = [];
 
-  const [missingEmail] = await prisma.$queryRaw<CountRow[]>`
-    SELECT COUNT(*)::int AS count
-    FROM "Customer"
-    WHERE email IS NULL OR "emailNormalized" IS NULL OR BTRIM(email) = ''
-  `;
-  const [customersWithoutVehicle] = await prisma.$queryRaw<CountRow[]>`
-    SELECT COUNT(*)::int AS count
-    FROM "Customer" c
-    WHERE NOT EXISTS (SELECT 1 FROM "CustomerVehicle" cv WHERE cv."customerId" = c.id)
-  `;
-  const [missingProductName] = await prisma.$queryRaw<CountRow[]>`
-    SELECT COUNT(*)::int AS count
-    FROM "OrderItem"
-    WHERE BTRIM("productName") = ''
-  `;
-  const duplicateEmails = await prisma.$queryRaw<DupRow[]>`
-    SELECT "emailNormalized" AS key, COUNT(*)::int AS count
-    FROM "Customer"
-    WHERE "emailNormalized" IS NOT NULL
-    GROUP BY "emailNormalized"
-    HAVING COUNT(*) > 1
-    ORDER BY COUNT(*) DESC
-    LIMIT 8
-  `;
-  const duplicateSkus = await prisma.$queryRaw<DupRow[]>`
-    SELECT "skuNormalized" AS key, COUNT(*)::int AS count
-    FROM "Product"
-    WHERE "skuNormalized" IS NOT NULL
-    GROUP BY "skuNormalized"
-    HAVING COUNT(*) > 1
-    ORDER BY COUNT(*) DESC
-    LIMIT 8
-  `;
-  const [dupEmailCount] = await prisma.$queryRaw<CountRow[]>`
-    SELECT COUNT(*)::int AS count FROM (
-      SELECT 1 FROM "Customer"
-      WHERE "emailNormalized" IS NOT NULL
-      GROUP BY "emailNormalized"
-      HAVING COUNT(*) > 1
-    ) AS d
-  `;
-  const [dupSkuCount] = await prisma.$queryRaw<CountRow[]>`
-    SELECT COUNT(*)::int AS count FROM (
-      SELECT 1 FROM "Product"
-      WHERE "skuNormalized" IS NOT NULL
-      GROUP BY "skuNormalized"
-      HAVING COUNT(*) > 1
-    ) AS d
-  `;
+  for (const item of orderItems) {
+    const extracted = item.extractedVehicle as ExtractedVehicle | null;
+    const confidence = item.extractionConfidence == null ? 0 : Number(item.extractionConfidence);
+    if (extracted == null) {
+      notProcessed += 1;
+      continue;
+    }
+    if (isNoVehicle(extracted)) {
+      noVehicle += 1;
+      if (noVehicleSamples.length < 6) {
+        noVehicleSamples.push({
+          productName: item.productName,
+          vehicle: extracted.application ?? null,
+          confidence,
+        });
+      }
+      continue;
+    }
+    if (hasVehicleSignal(extracted)) {
+      identified += 1;
+      if (confidence >= 0.85) highConfidence += 1;
+      else {
+        lowConfidence += 1;
+        if (lowConfidenceSamples.length < 6) {
+          lowConfidenceSamples.push({
+            productName: item.productName,
+            vehicle: extracted.application ?? null,
+            confidence,
+          });
+        }
+      }
+    }
+  }
 
-  const noVehicleSamples = await prisma.$queryRaw<SampleRow[]>`
-    SELECT "productName",
-      NULLIF("extractedVehicle"->>'application', '') AS vehicle,
-      "extractionConfidence"::float AS confidence
-    FROM "OrderItem"
-    WHERE "extractedVehicle" IS NOT NULL
-      AND (
-        COALESCE("extractedVehicle"->>'make', '') = ''
-        OR (
-          NOT (
-            jsonb_typeof("extractedVehicle"->'series') = 'array'
-            AND jsonb_array_length("extractedVehicle"->'series') > 0
-          )
-          AND COALESCE("extractedVehicle"->>'vehicleFamily', '') = ''
-          AND COALESCE("extractedVehicle"->>'model', '') = ''
-        )
-      )
-    ORDER BY "createdAt" DESC
-    LIMIT 6
-  `;
-  const lowConfidenceSamples = await prisma.$queryRaw<SampleRow[]>`
-    SELECT "productName",
-      NULLIF("extractedVehicle"->>'application', '') AS vehicle,
-      "extractionConfidence"::float AS confidence
-    FROM "OrderItem"
-    WHERE COALESCE("extractedVehicle"->>'make', '') <> ''
-      AND (
-        (
-          jsonb_typeof("extractedVehicle"->'series') = 'array'
-          AND jsonb_array_length("extractedVehicle"->'series') > 0
-        )
-        OR COALESCE("extractedVehicle"->>'vehicleFamily', '') <> ''
-        OR COALESCE("extractedVehicle"->>'model', '') <> ''
-      )
-      AND COALESCE("extractionConfidence", 0) < 0.85
-    ORDER BY "extractionConfidence" ASC
-    LIMIT 6
-  `;
+  const emailGroups = await prisma.customer.groupBy({
+    by: ["emailNormalized"],
+    where: { emailNormalized: { not: null } },
+    _count: { _all: true },
+    having: { emailNormalized: { _count: { gt: 1 } } },
+    orderBy: { _count: { emailNormalized: "desc" } },
+    take: 8,
+  });
+  const skuGroups = await prisma.product.groupBy({
+    by: ["skuNormalized"],
+    where: { skuNormalized: { not: null } },
+    _count: { _all: true },
+    having: { skuNormalized: { _count: { gt: 1 } } },
+    orderBy: { _count: { skuNormalized: "desc" } },
+    take: 8,
+  });
+
   const missingEmailSamples = await prisma.customer.findMany({
     where: { OR: [{ email: null }, { emailNormalized: null }, { email: "" }] },
     select: { name: true, email: true },
@@ -197,7 +136,7 @@ export async function getDataQuality(): Promise<{
     take: 6,
   });
 
-  const identified = n(vehicleStats?.identified);
+  void highConfidence;
   const cards: QualityCard[] = [
     {
       label: "Vehicle identified on orders",
@@ -209,7 +148,7 @@ export async function getDataQuality(): Promise<{
     },
     {
       label: "No vehicle on order line",
-      value: n(vehicleStats?.no_vehicle) + n(vehicleStats?.not_processed),
+      value: noVehicle + notProcessed,
       total: orderLines,
       href: "/orders",
       hint: "Generic accessories or lines the extractor could not match to a vehicle.",
@@ -217,7 +156,7 @@ export async function getDataQuality(): Promise<{
     },
     {
       label: "Low-confidence vehicle matches",
-      value: n(vehicleStats?.low_confidence),
+      value: lowConfidence,
       total: identified,
       href: "/orders",
       hint: "Vehicle was found, but confidence is below 0.85. These are not counted as missing.",
@@ -228,7 +167,7 @@ export async function getDataQuality(): Promise<{
     },
     {
       label: "Customers missing email",
-      value: n(missingEmail?.count),
+      value: missingEmail,
       total: customers,
       href: "/customers",
       hint: "Cannot be included in campaign export until an email is added.",
@@ -236,7 +175,7 @@ export async function getDataQuality(): Promise<{
     },
     {
       label: "Customers without a vehicle",
-      value: n(customersWithoutVehicle?.count),
+      value: customersWithoutVehicle,
       total: customers,
       href: "/opportunities",
       hint: "No linked vehicle from order extraction. Cross-sell grouping needs a vehicle.",
@@ -244,7 +183,7 @@ export async function getDataQuality(): Promise<{
     },
     {
       label: "Missing product name",
-      value: n(missingProductName?.count),
+      value: missingProductName,
       total: orderLines,
       href: "/orders",
       hint: "Order lines with a blank product title.",
@@ -252,17 +191,23 @@ export async function getDataQuality(): Promise<{
     },
     {
       label: "Duplicate customer emails",
-      value: n(dupEmailCount?.count),
+      value: emailGroups.length,
       href: "/customers",
       hint: "Same normalised email on more than one customer record.",
-      samples: duplicateEmails.map((row) => ({ label: row.key, detail: `${row.count} records` })),
+      samples: emailGroups.map((row) => ({
+        label: row.emailNormalized ?? "—",
+        detail: `${row._count._all} records`,
+      })),
     },
     {
       label: "Duplicate SKUs",
-      value: n(dupSkuCount?.count),
+      value: skuGroups.length,
       href: "/products",
       hint: "Same normalised SKU on more than one catalogue product.",
-      samples: duplicateSkus.map((row) => ({ label: row.key, detail: `${row.count} products` })),
+      samples: skuGroups.map((row) => ({
+        label: row.skuNormalized ?? "—",
+        detail: `${row._count._all} products`,
+      })),
     },
   ];
 

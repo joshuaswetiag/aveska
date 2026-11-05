@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { asItems, netoRequest } from "@/lib/catalogue/neto";
+import { asStringArray } from "@/lib/json-array";
 import { extractVehicle } from "@/lib/vehicle/extract";
 import { backfillCustomerVehiclesFromOrders } from "@/lib/vehicle/persist";
 import {
@@ -87,6 +88,12 @@ const LIVE_STATUSES = [
 export type NetoOrderSyncOptions = {
   from?: string | null;
   to?: string | null;
+  startPage?: number;
+  maxPages?: number;
+  timeBudgetMs?: number;
+  importedSoFar?: number;
+  skipBackfill?: boolean;
+  onPage?: (info: { nextPage: number; imported: number }) => Promise<void>;
 };
 
 export type NetoOrderApiFilter = {
@@ -156,50 +163,112 @@ export async function syncNetoOrders(
   onProgress?: (done: number, total: number, message?: string) => Promise<void>,
   options?: NetoOrderSyncOptions,
 ) {
-  const pageSize = 100;
+  const pageSize = Number(process.env.NETO_ORDER_PAGE_SIZE ?? 100) || 100;
   const range = parseOrderSyncRange(options ?? {});
   const dateFilters = range ? netoOrderDateFilters(range) : null;
+  const deadline = options?.timeBudgetMs ? Date.now() + options.timeBudgetMs : Number.POSITIVE_INFINITY;
+  const maxPages = options?.maxPages ?? Number.POSITIVE_INFINITY;
+  // Date-placed pass covers the history window; skip the slower "updated" pass unless opted in.
+  const includeUpdated = process.env.NETO_ORDERS_INCLUDE_UPDATED === "1";
   const passes: Array<{ filter: NetoOrderApiFilter; label: string }> = dateFilters && range
     ? [
         { filter: dateFilters.placed, label: `placed ${range.from} to ${range.to}` },
-        { filter: dateFilters.updated, label: `updated ${range.from} to ${range.to}` },
+        ...(includeUpdated
+          ? [{ filter: dateFilters.updated, label: `updated ${range.from} to ${range.to}` }]
+          : []),
       ]
     : [{ filter: { OrderStatus: LIVE_STATUSES }, label: "live Neto orders" }];
-  const products = await prisma.product.findMany({
-    select: { id: true, skuNormalized: true, make: true, series: true, vehicleFamily: true, bodyType: true, fitment: true },
-  });
-  const productBySku = new Map(
-    products.filter((product) => product.skuNormalized).map((product) => [product.skuNormalized as string, product]),
-  );
-  const customerByEmail = new Map(
-    (await prisma.customer.findMany({ where: { emailNormalized: { not: null } }, select: { id: true, emailNormalized: true, name: true, externalId: true } })).map(
-      (customer) => [customer.emailNormalized as string, customer],
-    ),
-  );
-  const customerByUsername = new Map(
-    (await prisma.customer.findMany({ where: { externalId: { not: null } }, select: { id: true, emailNormalized: true, name: true, externalId: true } })).map(
-      (customer) => [customer.externalId as string, customer],
-    ),
-  );
-  const orderByExternalId = new Map(
-    (await prisma.order.findMany({ where: { externalId: { not: null } }, select: { id: true, externalId: true } })).map((order) => [
-      order.externalId as string,
-      order.id,
-    ]),
-  );
+  type ProductHit = {
+    id: string;
+    skuNormalized: string | null;
+    make: string | null;
+    series: unknown;
+    vehicleFamily: string | null;
+    bodyType: string | null;
+    fitment: string | null;
+  };
+  type CustomerHit = { id: string; emailNormalized: string | null; name: string; externalId: string | null };
+  const productBySku = new Map<string, ProductHit>();
+  const customerByEmail = new Map<string, CustomerHit>();
+  const customerByUsername = new Map<string, CustomerHit>();
+  const orderByExternalId = new Map<string, string>();
 
   let pages = 0;
-  let imported = 0;
+  let imported = options?.importedSoFar ?? 0;
   let created = 0;
   let updated = 0;
   let lines = 0;
+  let done = false;
+  let nextPage = options?.startPage ?? 0;
   const seen = new Set<string>();
 
-  for (const pass of passes) {
-    let page = 0;
+  // Chunked runs use a single placed-date pass starting at startPage.
+  const activePasses =
+    options?.startPage != null || options?.timeBudgetMs != null || options?.maxPages != null
+      ? [passes[0]]
+      : passes;
+
+  for (const pass of activePasses) {
+    let page = options?.startPage ?? 0;
+    let pagesRun = 0;
     for (;;) {
+      if (pagesRun >= maxPages || Date.now() >= deadline) break;
       const { orders } = await fetchNetoOrderPage(page, pageSize, pass.filter);
-    if (!orders.length) break;
+    if (!orders.length) {
+      done = true;
+      break;
+    }
+
+    const pageSkus = [
+      ...new Set(
+        orders.flatMap((order) =>
+          asItems(order.OrderLine)
+            .map((line) => (line.SKU?.trim() ? normalizeKey(line.SKU.trim()) : ""))
+            .filter((sku) => sku && !productBySku.has(sku)),
+        ),
+      ),
+    ];
+    if (pageSkus.length) {
+      const products = await prisma.product.findMany({
+        where: { skuNormalized: { in: pageSkus } },
+        select: { id: true, skuNormalized: true, make: true, series: true, vehicleFamily: true, bodyType: true, fitment: true },
+      });
+      for (const product of products) {
+        if (product.skuNormalized) productBySku.set(product.skuNormalized, product);
+      }
+    }
+    const pageEmails = [...new Set(orders.map((order) => normalizeEmail(order.Email)).filter((email): email is string => Boolean(email && !customerByEmail.has(email))))];
+    if (pageEmails.length) {
+      const customers = await prisma.customer.findMany({
+        where: { emailNormalized: { in: pageEmails } },
+        select: { id: true, emailNormalized: true, name: true, externalId: true },
+      });
+      for (const customer of customers) {
+        if (customer.emailNormalized) customerByEmail.set(customer.emailNormalized, customer);
+        if (customer.externalId) customerByUsername.set(customer.externalId, customer);
+      }
+    }
+    const pageUsers = [...new Set(orders.map((order) => order.Username?.trim() || "").filter((name) => name && !customerByUsername.has(name)))];
+    if (pageUsers.length) {
+      const customers = await prisma.customer.findMany({
+        where: { externalId: { in: pageUsers } },
+        select: { id: true, emailNormalized: true, name: true, externalId: true },
+      });
+      for (const customer of customers) {
+        if (customer.externalId) customerByUsername.set(customer.externalId, customer);
+        if (customer.emailNormalized && !customerByEmail.has(customer.emailNormalized)) customerByEmail.set(customer.emailNormalized, customer);
+      }
+    }
+    const pageOrderIds = orders.map((order) => order.OrderID?.trim() || "").filter((id) => id && !orderByExternalId.has(id));
+    if (pageOrderIds.length) {
+      const existingOrders = await prisma.order.findMany({
+        where: { externalId: { in: pageOrderIds } },
+        select: { id: true, externalId: true },
+      });
+      for (const order of existingOrders) {
+        if (order.externalId) orderByExternalId.set(order.externalId, order.id);
+      }
+    }
 
     for (const netoOrder of orders) {
       const orderId = netoOrder.OrderID?.trim();
@@ -267,7 +336,7 @@ export async function syncNetoOrders(
           name: productName,
           sku,
           make: product?.make,
-          series: product?.series,
+          series: asStringArray(product?.series),
           fitment: product?.fitment,
           bodyType: product?.bodyType,
         });
@@ -308,6 +377,8 @@ export async function syncNetoOrders(
       lines += itemsData.length;
     }
 
+    pagesRun += 1;
+    nextPage = page + 1;
     if (onProgress) {
       await onProgress(
         imported,
@@ -315,27 +386,61 @@ export async function syncNetoOrders(
         `Imported ${imported.toLocaleString()} orders (${pass.label})`,
       );
     }
-    if (orders.length < pageSize) break;
-    page += 1;
-    if (page > 2000) break;
+    await options?.onPage?.({ nextPage, imported });
+    if (orders.length < pageSize) {
+      done = true;
+      break;
     }
-    pages += page + 1;
+    page += 1;
+    if (page > 2000) {
+      done = true;
+      break;
+    }
+    if (Date.now() >= deadline) break;
+    }
+    pages += pagesRun;
   }
 
-  if (onProgress) {
-    await onProgress(imported, imported, "Linking customers to extracted vehicles");
+  if (!options?.timeBudgetMs && !options?.maxPages && options?.startPage == null) {
+    done = true;
   }
-  const links = await backfillCustomerVehiclesFromOrders(onProgress);
-  return { imported, created, updated, lines, pages, from: range?.from ?? null, to: range?.to ?? null, ...links };
+
+  let links: Record<string, unknown> = {};
+  if (done && !options?.skipBackfill) {
+    if (onProgress) {
+      await onProgress(imported, imported, "Linking customers to extracted vehicles");
+    }
+    links = await backfillCustomerVehiclesFromOrders(onProgress);
+  }
+  return {
+    imported,
+    created,
+    updated,
+    lines,
+    pages,
+    nextPage,
+    done,
+    from: range?.from ?? null,
+    to: range?.to ?? null,
+    ...links,
+  };
 }
 
 export async function repairNetoOrderDates() {
-  const updated = await prisma.$executeRaw`
-    UPDATE "Order"
-    SET "orderDate" = (("originalData"->>'DatePlaced')::timestamp AT TIME ZONE 'UTC')
-    WHERE "sourceRowHash" LIKE 'neto:%'
-      AND NULLIF("originalData"->>'DatePlaced', '') IS NOT NULL
-  `;
+  const orders = await prisma.order.findMany({
+    where: { sourceRowHash: { startsWith: "neto:" } },
+    select: { id: true, originalData: true },
+  });
+  let updated = 0;
+  for (const order of orders) {
+    const data = order.originalData as { DatePlaced?: string } | null;
+    const raw = data?.DatePlaced?.trim();
+    if (!raw) continue;
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) continue;
+    await prisma.order.update({ where: { id: order.id }, data: { orderDate: date } });
+    updated += 1;
+  }
   return { updated };
 }
 

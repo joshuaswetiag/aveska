@@ -10,6 +10,13 @@ export type SendCandidate = {
   subject?: string | null;
 };
 
+/** eBay masked addresses cannot receive marketing email. */
+export function isEbayMemberEmail(email: string | null | undefined) {
+  if (!email) return false;
+  const normalized = email.trim().toLowerCase();
+  return normalized.endsWith("@members.ebay.com") || normalized.endsWith("@members.ebay.com.au");
+}
+
 export function eligibleRecipients(
   rows: SendCandidate[],
   suppressed: Set<string>,
@@ -21,6 +28,7 @@ export function eligibleRecipients(
     if (row.isSuppressed) return false;
     const email = row.emailNormalized ?? normalizeEmail(row.email);
     if (!email) return false;
+    if (isEbayMemberEmail(email)) return false;
     if (suppressed.has(email)) return false;
     return true;
   });

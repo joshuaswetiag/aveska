@@ -1,4 +1,3 @@
-import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { NextResponse } from "@/server/next-response";
 import { auth } from "@/auth";
@@ -7,6 +6,7 @@ import { parseSpreadsheet } from "@/lib/import/parse-file";
 import { detectColumnMapping } from "@/lib/import/columns";
 import type { ImportType } from "@prisma/client";
 import { audit } from "@/lib/audit";
+import { saveUpload } from "@/lib/storage";
 
 const ALLOWED = [".csv", ".xlsx", ".xls", ".json", ".txt"];
 
@@ -37,8 +37,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Could not parse the file. Check the format and try again." }, { status: 400 });
   }
 
-  const uploadDir = path.join(process.cwd(), "uploads");
-  await mkdir(uploadDir, { recursive: true });
   const importJob = await prisma.importJob.create({
     data: {
       type,
@@ -52,8 +50,7 @@ export async function POST(request: Request) {
       columnMapping: detectColumnMapping(parsed.headers, type === "CATALOGUE" ? "catalogue" : "orders") as object,
     },
   });
-  const filePath = path.join(uploadDir, `${importJob.id}${ext}`);
-  await writeFile(filePath, buffer);
+  const filePath = await saveUpload(`${importJob.id}${ext}`, buffer);
   await prisma.importJob.update({ where: { id: importJob.id }, data: { filePath } });
   await audit({ userId: session.user.id, action: "import_upload", entityType: "ImportJob", entityId: importJob.id });
 

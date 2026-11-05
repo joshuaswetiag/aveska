@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { asStringArray } from "@/lib/json-array";
 import { canonicalVehicleName, extractVehicle } from "@/lib/vehicle/extract";
 import { scoreRecommendation } from "@/lib/recommendation/score";
 import type { FitmentProfile, VehicleExtraction } from "@/types";
@@ -61,11 +62,11 @@ export function vehicleFromOrderItem(item: {
   extractedVehicle: unknown;
   product?: {
     make?: string | null;
-    series?: string[];
+    series?: unknown;
     fitment?: string | null;
     bodyType?: string | null;
     vehicleFamily?: string | null;
-    fitments?: Array<{ isNegative: boolean; vehicle: { make: string; model: string | null; vehicleFamily: string | null; series: string[]; bodyType: string | null; yearFrom: number | null; yearTo: number | null; application: string | null; canonicalName: string } }>;
+    fitments?: Array<{ isNegative: boolean; vehicle: { make: string; model: string | null; vehicleFamily: string | null; series: unknown; bodyType: string | null; yearFrom: number | null; yearTo: number | null; application: string | null; canonicalName: string } }>;
   } | null;
 }): { profile: FitmentProfile; label: string } | null {
   const extracted = item.extractedVehicle as VehicleExtraction | null;
@@ -80,7 +81,7 @@ export function vehicleFromOrderItem(item: {
         make: fitment.make,
         model: fitment.model,
         vehicleFamily: fitment.vehicleFamily,
-        series: fitment.series,
+        series: asStringArray(fitment.series),
         bodyType: fitment.bodyType,
         yearFrom: fitment.yearFrom,
         yearTo: fitment.yearTo,
@@ -93,7 +94,7 @@ export function vehicleFromOrderItem(item: {
     name: item.productName,
     sku: item.sku,
     make: item.product?.make,
-    series: item.product?.series,
+    series: asStringArray(item.product?.series),
     fitment: item.product?.fitment,
     bodyType: item.product?.bodyType,
   });
@@ -157,18 +158,22 @@ export function matchStockForVehicle(
     if (productMakes.size && !productMakes.has(make)) continue;
 
     const negative = product.overrides.some((o) => !o.isCompatible) || product.fitments.some((f) => f.isNegative);
-    const positiveOverride = product.overrides.some(
-      (o) =>
+    const positiveOverride = product.overrides.some((o) => {
+      const series = asStringArray(o.series);
+      return (
         o.isCompatible &&
         (!o.make || o.make.toLowerCase() === make) &&
-        (!o.series.length || o.series.some((s) => profile.series.includes(s))),
-    );
-    const explicitFitment = product.fitments.some(
-      (f) =>
+        (!series.length || series.some((s) => profile.series.includes(s)))
+      );
+    });
+    const explicitFitment = product.fitments.some((f) => {
+      const series = asStringArray(f.vehicle.series);
+      return (
         !f.isNegative &&
         f.vehicle.make.toLowerCase() === make &&
-        (profile.series.length === 0 || f.vehicle.series.some((code) => profile.series.includes(code))),
-    );
+        (profile.series.length === 0 || series.some((code) => profile.series.includes(code)))
+      );
+    });
 
     const scored = scoreRecommendation({
       customer: profile,
@@ -176,7 +181,7 @@ export function matchStockForVehicle(
         make: product.make,
         model: product.model,
         vehicleFamily: product.vehicleFamily,
-        series: product.series,
+        series: asStringArray(product.series),
         bodyType: product.bodyType,
         yearFrom: product.yearFrom,
         yearTo: product.yearTo,
@@ -184,7 +189,7 @@ export function matchStockForVehicle(
         sku: product.sku,
         category: product.category,
         fitment: product.fitment,
-        tags: product.tags,
+        tags: asStringArray(product.tags),
         discontinued: product.discontinued,
         stockStatus: product.stockStatus,
         explicitCompatibility: explicitFitment || positiveOverride,

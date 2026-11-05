@@ -70,7 +70,7 @@ async function customers(url: URL) {
   const q = url.searchParams.get("q")?.trim() || "";
   const rows = await prisma.customer.findMany({
     where: q
-      ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { email: { contains: q, mode: "insensitive" } }] }
+      ? { OR: [{ name: { contains: q } }, { email: { contains: q } }] }
       : undefined,
     include: { vehicles: { include: { vehicle: true } }, segments: { include: { segment: true } } },
     orderBy: { lastPurchaseAt: "desc" },
@@ -100,11 +100,11 @@ async function products(url: URL) {
   const where = q
     ? {
         OR: [
-          { name: { contains: q, mode: "insensitive" as const } },
-          { sku: { contains: q, mode: "insensitive" as const } },
-          { series: { has: q.toUpperCase() } },
-          { make: { contains: q, mode: "insensitive" as const } },
-          { vehicleFamily: { contains: q, mode: "insensitive" as const } },
+          { name: { contains: q } },
+          { sku: { contains: q } },
+          { searchableText: { contains: q } },
+          { make: { contains: q } },
+          { vehicleFamily: { contains: q } },
         ],
       }
     : undefined;

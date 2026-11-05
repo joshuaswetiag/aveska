@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/db";
+import { createManyIgnoreDuplicates } from "@/lib/create-many-safe";
+import { asStringArray } from "@/lib/json-array";
 import { scoreRecommendation } from "@/lib/recommendation/score";
 import type { FitmentProfile } from "@/types";
 import { slugify } from "@/lib/utils";
@@ -7,7 +9,7 @@ function profileFromVehicle(vehicle: {
   make: string;
   model: string | null;
   vehicleFamily: string | null;
-  series: string[];
+  series: unknown;
   bodyType: string | null;
   yearFrom: number | null;
   yearTo: number | null;
@@ -17,7 +19,7 @@ function profileFromVehicle(vehicle: {
     make: vehicle.make,
     model: vehicle.model,
     vehicleFamily: vehicle.vehicleFamily,
-    series: vehicle.series,
+    series: asStringArray(vehicle.series),
     bodyType: vehicle.bodyType,
     yearFrom: vehicle.yearFrom,
     yearTo: vehicle.yearTo,
@@ -85,7 +87,11 @@ export async function generateRecommendations(options?: {
 
   const flush = async () => {
     if (!pending.length) return;
-    await prisma.recommendation.createMany({ data: pending, skipDuplicates: true });
+    await createManyIgnoreDuplicates(
+      (args) => prisma.recommendation.createMany(args as { data: typeof pending }),
+      (args) => prisma.recommendation.create(args as { data: (typeof pending)[number] }),
+      pending,
+    );
     created += pending.length;
     pending = [];
   };
@@ -136,12 +142,15 @@ export async function generateRecommendations(options?: {
             (f) => !f.isNegative && f.vehicleId === customerVehicle.vehicleId,
           );
           const negative = product.overrides.some((o) => !o.isCompatible) || product.fitments.some((f) => f.isNegative);
-          const positiveOverride = product.overrides.some(
-            (o) =>
+          const vehicleSeries = asStringArray(customerVehicle.vehicle.series);
+          const positiveOverride = product.overrides.some((o) => {
+            const series = asStringArray(o.series);
+            return (
               o.isCompatible &&
               (!o.make || o.make.toLowerCase() === customerVehicle.vehicle.make.toLowerCase()) &&
-              (!o.series.length || o.series.some((s) => customerVehicle.vehicle.series.includes(s))),
-          );
+              (!series.length || series.some((s) => vehicleSeries.includes(s)))
+            );
+          });
 
           const scored = scoreRecommendation({
             customer: customerProfile,
@@ -149,7 +158,7 @@ export async function generateRecommendations(options?: {
               make: product.make,
               model: product.model,
               vehicleFamily: product.vehicleFamily,
-              series: product.series,
+              series: asStringArray(product.series),
               bodyType: product.bodyType,
               yearFrom: product.yearFrom,
               yearTo: product.yearTo,
@@ -157,7 +166,7 @@ export async function generateRecommendations(options?: {
               sku: product.sku,
               category: product.category,
               fitment: product.fitment,
-              tags: product.tags,
+              tags: asStringArray(product.tags),
               discontinued: product.discontinued,
               stockStatus: product.stockStatus,
               explicitCompatibility: explicitFitment || positiveOverride,
@@ -211,7 +220,7 @@ export async function segmentCustomers() {
     const names: Array<{ name: string; type: string }> = [];
     for (const cv of customer.vehicles) {
       const v = cv.vehicle;
-      const label = [v.make, v.series.join("/"), v.vehicleFamily].filter(Boolean).join(" ");
+      const label = [v.make, asStringArray(v.series).join("/"), v.vehicleFamily].filter(Boolean).join(" ");
       if (label) names.push({ name: `${label} Customer`, type: "vehicle" });
     }
     const types = customer.orders.flatMap((o) => o.items.map((i) => i.category || i.productName));

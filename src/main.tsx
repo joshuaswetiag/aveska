@@ -5,7 +5,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { AppShell } from "@/components/app-shell";
 import { BootstrapGate } from "@/components/bootstrap-gate";
 import { SignOutButton } from "@/components/sign-out-button";
-import { PageState, usePageData } from "@/lib/use-page-data.tsx";
+import { PageState, usePageData } from "@/lib/use-page-data";
 import LoginPage from "@/app/login/page";
 import DashboardPage from "@/app/(app)/page";
 import CustomersPage from "@/app/(app)/customers/page";

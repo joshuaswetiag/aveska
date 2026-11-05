@@ -6,32 +6,22 @@ export type MailSettingsRow = StoredMailSettings & {
 };
 
 export async function loadMailSettings(): Promise<MailSettingsRow | null> {
-  const rows = await prisma.$queryRaw<MailSettingsRow[]>`
-    SELECT
-      "emailProvider",
-      "fromName",
-      "fromEmail",
-      "replyTo",
-      "smtpHost",
-      "smtpPort",
-      "smtpSecure",
-      "smtpUser",
-      "smtpPassword",
-      "emailSendDelayMs",
-      "maropostAccountId",
-      "maropostApiKey",
-      "maropostCampaignName"
-    FROM "Settings"
-    WHERE id = 'default'
-    LIMIT 1
-  `;
-  const row = rows[0];
+  const row = await prisma.settings.findUnique({ where: { id: "default" } });
   if (!row) return null;
   return {
-    ...row,
+    emailProvider: row.emailProvider,
+    fromName: row.fromName,
+    fromEmail: row.fromEmail,
+    replyTo: row.replyTo,
+    smtpHost: row.smtpHost,
     smtpPort: row.smtpPort == null ? null : Number(row.smtpPort),
     smtpSecure: Boolean(row.smtpSecure),
+    smtpUser: row.smtpUser,
+    smtpPassword: row.smtpPassword,
     emailSendDelayMs: row.emailSendDelayMs == null ? 200 : Number(row.emailSendDelayMs),
+    maropostAccountId: row.maropostAccountId,
+    maropostApiKey: row.maropostApiKey,
+    maropostCampaignName: row.maropostCampaignName,
   };
 }
 
@@ -50,23 +40,22 @@ export async function saveMailSettings(data: {
   maropostApiKey: string | null;
   maropostCampaignName: string | null;
 }) {
-  await prisma.$executeRaw`
-    UPDATE "Settings"
-    SET
-      "emailProvider" = ${data.emailProvider},
-      "fromName" = ${data.fromName},
-      "fromEmail" = ${data.fromEmail},
-      "replyTo" = ${data.replyTo},
-      "smtpHost" = ${data.smtpHost},
-      "smtpPort" = ${data.smtpPort},
-      "smtpSecure" = ${data.smtpSecure},
-      "smtpUser" = ${data.smtpUser},
-      "smtpPassword" = ${data.smtpPassword},
-      "emailSendDelayMs" = ${data.emailSendDelayMs},
-      "maropostAccountId" = ${data.maropostAccountId},
-      "maropostApiKey" = ${data.maropostApiKey},
-      "maropostCampaignName" = ${data.maropostCampaignName},
-      "updatedAt" = NOW()
-    WHERE id = 'default'
-  `;
+  await prisma.settings.update({
+    where: { id: "default" },
+    data: {
+      emailProvider: data.emailProvider,
+      fromName: data.fromName,
+      fromEmail: data.fromEmail,
+      replyTo: data.replyTo,
+      smtpHost: data.smtpHost,
+      smtpPort: data.smtpPort,
+      smtpSecure: data.smtpSecure,
+      smtpUser: data.smtpUser,
+      smtpPassword: data.smtpPassword,
+      emailSendDelayMs: data.emailSendDelayMs,
+      maropostAccountId: data.maropostAccountId,
+      maropostApiKey: data.maropostApiKey,
+      maropostCampaignName: data.maropostCampaignName,
+    },
+  });
 }

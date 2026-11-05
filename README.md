@@ -22,36 +22,24 @@ copy .env.example .env
 
 Required:
 
-- `DATABASE_URL` — PostgreSQL connection string
+- `DATABASE_URL` — local SQLite file URL, e.g. `file:./prisma/dev.db`
 - `AUTH_SECRET` — long random string for Auth.js
 
 Optional:
 
 - `AI_PROVIDER` / `AI_API_KEY` — leave as `none` to use the built-in template writer
-- `EMAIL_PROVIDER` — `export` (no send), `smtp`, or `maropost`
-- `SMTP_FROM` / `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` — required for SMTP send
+- `EMAIL_PROVIDER` — `resend` (Cloudflare), `export` (no send), `smtp` (local only), or `maropost`
+- `RESEND_API_KEY` / `SMTP_FROM` — required for Resend send
 - `MAROPOST_ACCOUNT_ID` / `MAROPOST_API_KEY` — required when `EMAIL_PROVIDER=maropost`
 
 ## Database setup
 
-PostgreSQL is required. This machine does not have Docker, so use the local Scoop install:
+Local development uses SQLite (same engine as Cloudflare D1):
 
 ```bash
-pg_ctl start
-createdb -U postgres aveska
 npx prisma migrate deploy
 npm run db:seed
 ```
-
-If Postgres is already running, skip `pg_ctl start`. Stop it later with `pg_ctl stop`.
-
-Docker alternative (if you install Docker Desktop later):
-
-```bash
-docker compose up -d
-```
-
-Then set `DATABASE_URL` to `postgresql://aveska:aveska@localhost:5432/aveska?schema=public`.
 
 Default admin login after seed:
 
@@ -83,47 +71,56 @@ npm start
 
 ## Deploy on Cloudflare
 
-The public site is the Vite app. Cloudflare cannot reach PostgreSQL on your PC, so production needs a hosted database (Neon, Supabase, or another public Postgres) attached with [Hyperdrive](https://developers.cloudflare.com/hyperdrive/).
+Hosting is Cloudflare-only: **Workers** (Vite `dist/` + API), **D1** (SQLite), **R2** (import uploads), **Cron** (job queue). Mail uses **Resend** (Workers block SMTP).
 
-1. Create the hosted Postgres database and set `DATABASE_URL` to it. Apply the schema and seed once:
-
-```bash
-npx prisma migrate deploy
-npm run db:seed
-```
-
-2. Log in and create a Worker from this repo:
+1. Log in and create D1 + R2:
 
 ```bash
 npx wrangler login
+npx wrangler d1 create aveska
+npx wrangler r2 bucket create aveska-uploads
 ```
 
-In the [Cloudflare dashboard](https://dash.cloudflare.com), create a Worker, connect [joshuaswetiag/aveska](https://github.com/joshuaswetiag/aveska), and attach Hyperdrive to that database. Build command: `npm run build`. The static client is `dist/`.
+Paste the returned D1 `database_id` into `wrangler.toml` (`[[d1_databases]].database_id`).
 
-3. Set these secrets to the Worker or custom-domain `https` URL:
+2. Apply the schema to D1:
 
-```text
-DATABASE_URL=<hosted Postgres URL, via Hyperdrive>
-AUTH_SECRET=<long random string>
-AUTH_URL=https://<your-worker-or-domain>
-TRACKING_URL=https://<your-worker-or-domain>
-EMAIL_PROVIDER=resend
-RESEND_API_KEY=re_your_key
-SMTP_FROM=hello@aveska.com.au
-SMTP_FROM_NAME=Aveska
-ADMIN_EMAIL=admin@aveska.local
-ADMIN_PASSWORD=<strong password, not change-me>
-NETO_API_URL=https://www.aveska.com.au/do/WS/NetoAPI
-NETO_API_KEY=<from local .env>
-NETO_API_USERNAME=<from local .env>
+```bash
+npm run cf:migrate
 ```
 
-4. Put uploaded import files in [R2](https://developers.cloudflare.com/r2/). Run background jobs with a [Cron Trigger](https://developers.cloudflare.com/workers/configuration/cron-triggers/). The local server writes uploads to disk and polls jobs in-process; Workers cannot do either.
-5. Sign in and set **Settings → Public app URL** to that same `https` URL before sending campaigns. Click tracking uses that host. Do not use a trycloudflare tunnel — those hostnames die when they restart, and links already sent cannot be repaired.
+For a local Miniflare D1: `npm run cf:migrate:local`.
 
-Do not commit `.env`. Use Resend for mail. SMTP ports are blocked from Workers, so Gmail SMTP stays a local-only option.
+3. Seed production once (fresh D1). Easiest path: seed local SQLite, then copy critical rows, or run `npm run db:seed` against a temporary local file and re-import. For a brand-new deploy, seed locally for testing and create the admin user on D1 with the same password hash from your local `User` row, or re-run seed against a throwaway SQLite file and use Wrangler to insert that row.
 
-The Worker entry (Hyperdrive, R2, and Cron) is not wired in this repo yet. Connecting the GitHub repo publishes the Vite client. API routes, jobs, and uploads still run with `npm start` until that Worker adapter lands.
+4. Build and deploy:
+
+```bash
+npm run deploy
+```
+
+5. Set Worker secrets (and `AUTH_URL` / `TRACKING_URL` to the public `https` URL):
+
+```bash
+npx wrangler secret put AUTH_SECRET
+npx wrangler secret put AUTH_URL
+npx wrangler secret put TRACKING_URL
+npx wrangler secret put RESEND_API_KEY
+npx wrangler secret put SMTP_FROM
+npx wrangler secret put SMTP_FROM_NAME
+npx wrangler secret put ADMIN_EMAIL
+npx wrangler secret put ADMIN_PASSWORD
+npx wrangler secret put NETO_API_KEY
+npx wrangler secret put NETO_API_USERNAME
+```
+
+`EMAIL_PROVIDER=resend` is already in `wrangler.toml` `[vars]`.
+
+6. Sign in and set **Settings → Public app URL** to that same `https` URL before sending campaigns. Click tracking uses that host.
+
+Do not commit `.env`. Use Resend for mail on Cloudflare; Gmail SMTP stays local-only (`npm run dev` / `npm start`).
+
+Cron runs every 2 minutes (`wrangler.toml` `[triggers]`) and drains up to 5 queued jobs via `processNextJob`. Locally, keep using `npm run worker` or in-request `/api/jobs/.../process`.
 
 ## Importing orders
 

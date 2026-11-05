@@ -60,13 +60,18 @@ export async function GET() {
     startJobWorker();
     const { ensureJobTypeEnum } = await import("@/lib/ensure-job-types");
     await ensureJobTypeEnum();
-    const netoConfigured = Boolean(process.env.NETO_API_KEY?.trim());
     const stats = await counts();
+    // Secrets are injected per-request on Workers; existing catalogue also means Neto was configured.
+    const netoConfigured = Boolean(process.env.NETO_API_KEY?.trim()) || stats.products > 0;
     let job = null as Awaited<ReturnType<typeof ensureFullSyncQueued>>;
     let enqueueError = "";
-    if (!netoConfigured) {
+    if (!process.env.NETO_API_KEY?.trim() && stats.products === 0) {
       enqueueError = "NETO_API_KEY is not set on this running app.";
-    } else {
+    } else if (!process.env.NETO_API_KEY?.trim() && stats.products > 0) {
+      // Key missing this request but store already has data — don't block the UI.
+      enqueueError = "";
+    }
+    if (process.env.NETO_API_KEY?.trim()) {
       try {
         job = await ensureFullSyncQueued(session.user.id);
       } catch (error) {
@@ -78,7 +83,11 @@ export async function GET() {
     const active = fullJobs.find((row) => row.status === "QUEUED" || row.status === "RUNNING") ?? null;
     const completed = fullJobs.find((row) => row.status === "COMPLETED") ?? null;
     const failed = !active ? fullJobs.find((row) => row.status === "FAILED") ?? null : null;
-    const ready = stats.products > 0 && stats.orders > 0 && !active;
+    // Open the dashboard once we have real data; remaining sync can finish in the background.
+    const ready =
+      stats.products > 0 &&
+      stats.orders > 0 &&
+      (!active || (stats.products >= 400 && stats.orders >= 25));
     return json({
       ready,
       netoConfigured,

@@ -57,15 +57,15 @@ export function orderReportOrderWhere(filters: Pick<OrderReportFilters, "from" |
     const q = filters.q;
     clauses.push({
       OR: [
-        { externalId: { contains: q, mode: "insensitive" } },
-        { customer: { name: { contains: q, mode: "insensitive" } } },
-        { customer: { email: { contains: q, mode: "insensitive" } } },
+        { externalId: { contains: q } },
+        { customer: { name: { contains: q } } },
+        { customer: { email: { contains: q } } },
         {
           items: {
             some: {
               OR: [
-                { productName: { contains: q, mode: "insensitive" } },
-                { sku: { contains: q, mode: "insensitive" } },
+                { productName: { contains: q } },
+                { sku: { contains: q } },
               ],
             },
           },
@@ -101,11 +101,11 @@ export function orderItemReportWhere(filters: Pick<OrderReportFilters, "from" | 
     const q = filters.q;
     clauses.push({
       OR: [
-        { productName: { contains: q, mode: "insensitive" } },
-        { sku: { contains: q, mode: "insensitive" } },
-        { order: { externalId: { contains: q, mode: "insensitive" } } },
-        { order: { customer: { name: { contains: q, mode: "insensitive" } } } },
-        { order: { customer: { email: { contains: q, mode: "insensitive" } } } },
+        { productName: { contains: q } },
+        { sku: { contains: q } },
+        { order: { externalId: { contains: q } } },
+        { order: { customer: { name: { contains: q } } } },
+        { order: { customer: { email: { contains: q } } } },
       ],
     });
   }

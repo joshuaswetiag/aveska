@@ -7,7 +7,7 @@ import { extractCatalogueFitments, extractOrderVehicles } from "@/lib/vehicle/pe
 import { generateRecommendations } from "@/lib/recommendation/generate";
 import { generateCampaign } from "@/lib/campaign/generate";
 import { runDemo } from "@/lib/demo/run-demo";
-import { readFile } from "fs/promises";
+import { readUpload } from "@/lib/storage";
 
 export async function enqueueJob(input: {
   type: JobType;
@@ -30,10 +30,17 @@ export async function enqueueJob(input: {
 }
 
 export async function processNextJob(jobId?: string) {
+  const staleNeto = new Date(Date.now() - 45_000);
   const job = jobId
     ? await prisma.job.findUnique({ where: { id: jobId } })
     : await prisma.job.findFirst({
-        where: { status: "QUEUED" },
+        where: {
+          OR: [
+            { status: "QUEUED" },
+            { status: "FAILED", type: "NETO_SYNC" },
+            { status: "RUNNING", type: "NETO_SYNC", updatedAt: { lt: staleNeto } },
+          ],
+        },
         orderBy: { createdAt: "asc" },
       });
   if (!job || job.status === "COMPLETED" || job.status === "CANCELLED") return job?.id ?? null;
@@ -44,8 +51,13 @@ export async function processNextJob(jobId?: string) {
   if (inflight.has(job.id)) return job.id;
   if (job.status === "RUNNING") {
     const staleMs = Date.now() - job.updatedAt.getTime();
-    const sendStuck = job.type === "SEND_CAMPAIGN" && job.progress === 0 && staleMs > 45_000;
-    if (!sendStuck && staleMs < 90_000) return job.id;
+    // waitUntil chunks need a longer lease so overlapping Workers don't corrupt page state.
+    if (job.type === "NETO_SYNC") {
+      if (staleMs < 45_000) return job.id;
+    } else {
+      const sendStuck = job.type === "SEND_CAMPAIGN" && job.progress === 0 && staleMs > 45_000;
+      if (!sendStuck && staleMs < 90_000) return job.id;
+    }
   }
   inflight.add(job.id);
 
@@ -62,7 +74,14 @@ export async function processNextJob(jobId?: string) {
     });
     if (claimed.count === 0) return job.id;
 
+    let lastProgressAt = 0;
+    let lastProgressDone = -1;
     const progress = async (done: number, total: number, message?: string) => {
+      const now = Date.now();
+      const jumped = Math.abs(done - lastProgressDone) >= Math.max(1, Math.floor(total / 50));
+      if (now - lastProgressAt < 750 && !jumped && done < total) return;
+      lastProgressAt = now;
+      lastProgressDone = done;
       await prisma.job.update({
         where: { id: job.id },
         data: { progress: done, total, message: message ?? `Processing ${done} / ${total}` },
@@ -79,7 +98,7 @@ export async function processNextJob(jobId?: string) {
     if (job.type === "IMPORT" && job.importJobId) {
       const importJob = await prisma.importJob.findUniqueOrThrow({ where: { id: job.importJobId } });
       if (!importJob.filePath || !importJob.columnMapping) throw new Error("Import is missing file or column mapping");
-      const buffer = await readFile(importJob.filePath);
+      const buffer = await readUpload(importJob.filePath);
       const parsed = parseSpreadsheet(buffer, importJob.fileName);
       await progress(0, parsed.rows.length, "Importing rows");
       const mapping = importJob.columnMapping as ColumnMapping;
@@ -115,16 +134,87 @@ export async function processNextJob(jobId?: string) {
       const stats = (campaign as { generateStats?: Record<string, unknown> }).generateStats;
       result = { campaignId: campaign.id, recipients, ...stats };
     } else if (job.type === "NETO_SYNC") {
-      const payload = (job.payload ?? {}) as { kind?: string; from?: string; to?: string };
+      const payload = (job.payload ?? {}) as {
+        kind?: string;
+        from?: string;
+        to?: string;
+        phase?: string;
+        productPage?: number;
+        orderPage?: number;
+        importedProducts?: number;
+        importedOrders?: number;
+        refreshNeto?: boolean;
+      };
       if (payload.kind === "full") {
-        const { syncFullAveskaStore } = await import("@/lib/catalogue/full-sync");
-        result = await syncFullAveskaStore(progress);
+        const { runFullSyncForRuntime } = await import("@/lib/catalogue/full-sync");
+        const advanced = await runFullSyncForRuntime(
+          {
+            kind: "full",
+            from: payload.from,
+            to: payload.to,
+            phase: (payload.phase as "products" | "orders" | "done" | undefined) ?? "products",
+            productPage: payload.productPage,
+            orderPage: payload.orderPage,
+            importedProducts: payload.importedProducts,
+            importedOrders: payload.importedOrders,
+            refreshNeto: payload.refreshNeto,
+            pageSize: (payload as { pageSize?: number }).pageSize,
+          },
+          progress,
+          async (state) => {
+            await prisma.job.update({
+              where: { id: job.id },
+              data: {
+                status: "RUNNING",
+                payload: state as object,
+                message: `Imported ${(state.importedProducts ?? 0).toLocaleString()} live products`,
+                errorMessage: null,
+              },
+            });
+          },
+        );
+        if (!advanced.done) {
+          await prisma.job.update({
+            where: { id: job.id },
+            data: {
+              status: "QUEUED",
+              payload: advanced.payload as object,
+              message: "Continuing sync…",
+              errorMessage: null,
+            },
+          });
+          return job.id;
+        }
+        result = advanced.result as object;
       } else if (payload.kind === "orders") {
         const { syncNetoOrders } = await import("@/lib/catalogue/neto-orders");
         result = await syncNetoOrders(progress, { from: payload.from, to: payload.to });
       } else {
         const { syncNetoCatalogue } = await import("@/lib/catalogue/neto");
-        result = await syncNetoCatalogue(progress);
+        const chunk = await syncNetoCatalogue(progress, {
+          extractVehicles: true,
+          startPage: payload.productPage ?? 0,
+          importedSoFar: payload.importedProducts ?? 0,
+          timeBudgetMs: (globalThis as { aveskaD1?: unknown }).aveskaD1 ? 12_000 : undefined,
+          maxPages: (globalThis as { aveskaD1?: unknown }).aveskaD1 ? 3 : undefined,
+        });
+        if (!chunk.done) {
+          await prisma.job.update({
+            where: { id: job.id },
+            data: {
+              status: "QUEUED",
+              payload: {
+                ...payload,
+                productPage: chunk.nextPage,
+                importedProducts: chunk.imported,
+              } as object,
+              message: "Continuing catalogue sync…",
+              errorMessage: null,
+            },
+          });
+          return job.id;
+        }
+        result = chunk;
       }
     } else if (job.type === "DEMO") {
       result = await runDemo(progress);

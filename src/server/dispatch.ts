@@ -11,7 +11,8 @@ type Route = {
   method: string;
   pattern: RegExp;
   keys: string[];
-  load: () => Promise<RouteModule>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  load: () => Promise<any>;
 };
 
 const routes: Route[] = [

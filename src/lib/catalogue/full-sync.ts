@@ -5,10 +5,40 @@ import { syncNetoCatalogue } from "@/lib/catalogue/neto";
 import { syncNetoOrders } from "@/lib/catalogue/neto-orders";
 import { extractCatalogueFitments, harvestVehiclesFromOrderLines } from "@/lib/vehicle/persist";
 
-export const FULL_SYNC_FROM = "2016-01-01";
+/** Default order history window for first-load sync (override with NETO_ORDERS_FROM). */
+function defaultOrdersFrom() {
+  const date = new Date();
+  date.setFullYear(date.getFullYear() - 3);
+  return date.toISOString().slice(0, 10);
+}
+
+export const FULL_SYNC_FROM = process.env.NETO_ORDERS_FROM?.trim() || defaultOrdersFrom();
+
+export type FullSyncPayload = {
+  kind: "full";
+  from?: string;
+  to?: string;
+  phase?: "products" | "orders" | "done";
+  productPage?: number;
+  orderPage?: number;
+  importedProducts?: number;
+  importedOrders?: number;
+  productTotal?: number;
+  pageSize?: number;
+  refreshNeto?: boolean;
+};
 
 export function isFullSyncJob(payload: unknown) {
   return Boolean(payload && typeof payload === "object" && (payload as { kind?: string }).kind === "full");
+}
+
+function isWorkerRuntime() {
+  if (process.env.AVESKA_RUNTIME === "worker") return true;
+  const g = globalThis as {
+    aveskaD1?: unknown;
+    Cloudflare?: unknown;
+  };
+  return Boolean(g.aveskaD1 || g.Cloudflare);
 }
 
 async function scaled(
@@ -23,6 +53,7 @@ async function scaled(
   });
 }
 
+/** Local / long-running full sync (Node). */
 export async function syncFullAveskaStore(
   onProgress?: (done: number, total: number, message?: string) => Promise<void>,
   options?: { refreshNeto?: boolean },
@@ -34,7 +65,9 @@ export async function syncFullAveskaStore(
   let catalogue: unknown = { skipped: true, imported: productCount };
   if (options?.refreshNeto || productCount < 1000) {
     await onProgress?.(1, 100, "Syncing live Aveska products…");
-    catalogue = await scaled(1, 34, onProgress, (progress) => syncNetoCatalogue(progress));
+    catalogue = await scaled(1, 34, onProgress, (progress) =>
+      syncNetoCatalogue(progress, { extractVehicles: false }),
+    );
   } else {
     await onProgress?.(35, 100, `Using ${productCount.toLocaleString()} products already synced`);
   }
@@ -66,12 +99,142 @@ export async function syncFullAveskaStore(
   return { catalogue, orders, from, to };
 }
 
+/**
+ * One short chunk of full sync for Cloudflare Workers (avoids request cancel / hang).
+ * Persist returned payload on the job and re-queue until done.
+ */
+export async function advanceFullSync(
+  payload: FullSyncPayload,
+  onProgress?: (done: number, total: number, message?: string) => Promise<void>,
+  timeBudgetMs = 20_000,
+  persist?: (state: FullSyncPayload) => Promise<void>,
+) {
+  // Shorter history on Workers so first load finishes much faster.
+  const defaultFrom = (() => {
+    const date = new Date();
+    date.setMonth(date.getMonth() - 18);
+    return date.toISOString().slice(0, 10);
+  })();
+  // A one-day window (from === to) was stored on a stuck job. Expand it so order history actually syncs.
+  const windowTooSmall =
+    Boolean(payload.from && payload.to && payload.from >= payload.to) ||
+    Boolean(payload.from && payload.to && Date.parse(payload.to) - Date.parse(payload.from) < 30 * 86400000);
+  const from = windowTooSmall ? defaultFrom : payload.from || process.env.NETO_ORDERS_FROM?.trim() || defaultFrom;
+  const to = payload.to || storeIsoDate();
+  const state: FullSyncPayload = {
+    ...payload,
+    kind: "full",
+    from,
+    to,
+    phase: payload.phase ?? "products",
+    productPage: payload.productPage ?? 0,
+    orderPage: payload.orderPage ?? 0,
+    importedProducts: payload.importedProducts ?? 0,
+    importedOrders: payload.importedOrders ?? 0,
+  };
+  const started = Date.now();
+  const remaining = () => Math.max(2_000, timeBudgetMs - (Date.now() - started));
+
+  if (state.phase === "products") {
+    // Always pull the full Neto catalogue (chunked). Do not stop early on a partial count.
+    await onProgress?.(1, 100, "Syncing live Aveska products…");
+      const pageSize = state.pageSize || 80;
+      state.pageSize = pageSize;
+      const chunk = await syncNetoCatalogue(
+        async (done, total, message) => {
+          const pct = 1 + Math.round((done / Math.max(total, 1)) * 34);
+          await onProgress?.(Math.min(35, pct), 100, message);
+        },
+        {
+          extractVehicles: false,
+          startPage: state.productPage ?? 0,
+          timeBudgetMs: remaining(),
+          importedSoFar: state.importedProducts ?? 0,
+          maxPages: 2,
+          pageSize,
+          onPage: async (info) => {
+            state.productPage = info.nextPage;
+            state.importedProducts = info.imported;
+            state.productTotal = info.total;
+            await persist?.(state);
+          },
+        },
+      );
+    state.importedProducts = chunk.imported;
+    state.productPage = chunk.nextPage;
+    state.productTotal = chunk.total;
+    if (!chunk.done) {
+      return { done: false, payload: state, result: chunk };
+    }
+    state.phase = "orders";
+    state.orderPage = 0;
+  }
+
+  if (state.phase === "orders" && remaining() > 2_000) {
+      const chunk = await syncNetoOrders(
+        async (done, _total, message) => {
+          const pct = 36 + Math.min(39, Math.round(done / 50));
+          await onProgress?.(Math.min(76, pct), 100, message);
+        },
+        {
+          from,
+          to,
+          startPage: state.orderPage ?? 0,
+          timeBudgetMs: remaining(),
+          importedSoFar: state.importedOrders ?? 0,
+          maxPages: 2,
+          skipBackfill: true,
+          onPage: async (info) => {
+            state.orderPage = info.nextPage;
+            state.importedOrders = info.imported;
+            await persist?.(state);
+          },
+        },
+      );
+      state.importedOrders = chunk.imported;
+      state.orderPage = chunk.nextPage;
+      if (!chunk.done) {
+        return { done: false, payload: state, result: chunk };
+      }
+      state.phase = "done";
+  }
+
+  if (state.phase === "done") {
+    await onProgress?.(100, 100, "Aveska store loaded");
+    return {
+      done: true,
+      payload: state,
+      result: {
+        from,
+        to,
+        products: state.importedProducts,
+        orders: state.importedOrders,
+        workerChunked: true,
+      },
+    };
+  }
+
+  return { done: false, payload: state, result: { waiting: true } };
+}
+
+export async function runFullSyncForRuntime(
+  payload: FullSyncPayload,
+  onProgress?: (done: number, total: number, message?: string) => Promise<void>,
+  persist?: (state: FullSyncPayload) => Promise<void>,
+) {
+  if (isWorkerRuntime()) {
+    return advanceFullSync(payload, onProgress, 20_000, persist);
+  }
+  const result = await syncFullAveskaStore(onProgress, { refreshNeto: payload.refreshNeto });
+  return { done: true as const, payload: { ...payload, phase: "done" as const }, result };
+}
+
 export async function listFullSyncJobs() {
   try {
     return await prisma.job.findMany({
       where: {
         type: "NETO_SYNC",
-        payload: { path: ["kind"], equals: "full" },
+        payload: { path: "$.kind", equals: "full" },
       },
       orderBy: { createdAt: "desc" },
       take: 20,
@@ -102,7 +265,14 @@ export async function ensureFullSyncQueued(createdById?: string, force = false) 
   if (!force && products > 0 && orders > 0) return completed ?? null;
   return enqueueJob({
     type: "NETO_SYNC",
-    payload: { kind: "full", from: FULL_SYNC_FROM, to: storeIsoDate() },
+    payload: {
+      kind: "full",
+      from: FULL_SYNC_FROM,
+      to: storeIsoDate(),
+      phase: "products",
+      productPage: 0,
+      orderPage: 0,
+    } satisfies FullSyncPayload,
     createdById,
     total: 100,
   });

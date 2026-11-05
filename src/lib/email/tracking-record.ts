@@ -1,5 +1,4 @@
 import { prisma } from "@/lib/db";
-import { randomBytes } from "crypto";
 import { isEphemeralTrackingOrigin, isStableTrackingOrigin, pickTrackingBaseUrl, railwayPublicOrigin, trackingLinkLabel } from "@/lib/email/tracking";
 
 export {
@@ -24,14 +23,6 @@ export function trackingPixelResponse() {
   });
 }
 
-type RecipientRow = {
-  id: string;
-  campaignId: string;
-  customerId: string;
-  opened: boolean;
-  clicked: boolean;
-};
-
 export type TrafficEvent = {
   id: string;
   type: string;
@@ -45,25 +36,23 @@ export type TrafficEvent = {
   campaignName: string;
 };
 
-function newId() {
-  return `c${randomBytes(12).toString("hex")}`;
-}
-
 export async function loadTrackingUrl() {
   try {
-    const rows = await prisma.$queryRaw<Array<{ trackingUrl: string | null }>>`
-      SELECT "trackingUrl" FROM "Settings" WHERE id = 'default' LIMIT 1
-    `;
-    return rows[0]?.trackingUrl?.trim() || null;
+    const row = await prisma.settings.findUnique({
+      where: { id: "default" },
+      select: { trackingUrl: true },
+    });
+    return row?.trackingUrl?.trim() || null;
   } catch {
     return null;
   }
 }
 
 export async function saveTrackingUrl(url: string | null) {
-  await prisma.$executeRaw`
-    UPDATE "Settings" SET "trackingUrl" = ${url}, "updatedAt" = NOW() WHERE id = 'default'
-  `;
+  await prisma.settings.update({
+    where: { id: "default" },
+    data: { trackingUrl: url },
+  });
 }
 
 export async function resolveTrackingBaseUrl() {
@@ -100,123 +89,92 @@ export async function recordCampaignTraffic(input: {
   type: "CLICK" | "OPEN";
   url?: string | null;
 }) {
-  const rows = await prisma.$queryRaw<RecipientRow[]>`
-    SELECT id, "campaignId", "customerId", opened, clicked
-    FROM "CampaignRecipient"
-    WHERE id = ${input.recipientId}
-    LIMIT 1
-  `;
-  const recipient = rows[0];
+  const recipient = await prisma.campaignRecipient.findUnique({
+    where: { id: input.recipientId },
+    select: { id: true, campaignId: true, customerId: true, opened: true, clicked: true },
+  });
   if (!recipient) {
     console.warn("Traffic not recorded: campaign recipient not found", input.recipientId, input.type);
     return null;
   }
+  const now = new Date();
   const label =
     input.type === "CLICK" && input.url ? trackingLinkLabel(input.url) : input.type === "OPEN" ? "Opened email" : null;
-  await prisma.$executeRaw`
-    INSERT INTO "CampaignTraffic" (id, "campaignId", "recipientId", "customerId", type, url, label, "createdAt")
-    VALUES (${newId()}, ${recipient.campaignId}, ${recipient.id}, ${recipient.customerId}, ${input.type}, ${input.url ?? null}, ${label}, NOW())
-  `;
+  await prisma.campaignTraffic.create({
+    data: {
+      campaignId: recipient.campaignId,
+      recipientId: recipient.id,
+      customerId: recipient.customerId,
+      type: input.type,
+      url: input.url ?? null,
+      label,
+    },
+  });
   if (input.type === "CLICK") {
-    await prisma.$executeRaw`
-      UPDATE "CampaignRecipient"
-      SET opened = true,
-          clicked = true,
-          "openedAt" = COALESCE("openedAt", NOW()),
-          "clickedAt" = COALESCE("clickedAt", NOW()),
-          "updatedAt" = NOW()
-      WHERE id = ${recipient.id}
-    `;
-    await prisma.$executeRaw`
-      UPDATE "Campaign"
-      SET clicked = clicked + 1,
-          opened = opened + ${recipient.opened ? 0 : 1},
-          "updatedAt" = NOW()
-      WHERE id = ${recipient.campaignId}
-    `;
+    await prisma.campaignRecipient.update({
+      where: { id: recipient.id },
+      data: {
+        opened: true,
+        clicked: true,
+        openedAt: recipient.opened ? undefined : now,
+        clickedAt: now,
+      },
+    });
+    await prisma.campaign.update({
+      where: { id: recipient.campaignId },
+      data: {
+        clicked: { increment: 1 },
+        opened: recipient.opened ? undefined : { increment: 1 },
+      },
+    });
   } else if (!recipient.opened) {
-    await prisma.$executeRaw`
-      UPDATE "CampaignRecipient"
-      SET opened = true,
-          "openedAt" = COALESCE("openedAt", NOW()),
-          "updatedAt" = NOW()
-      WHERE id = ${recipient.id}
-    `;
-    await prisma.$executeRaw`
-      UPDATE "Campaign"
-      SET opened = opened + 1, "updatedAt" = NOW()
-      WHERE id = ${recipient.campaignId}
-    `;
+    await prisma.campaignRecipient.update({
+      where: { id: recipient.id },
+      data: { opened: true, openedAt: now },
+    });
+    await prisma.campaign.update({
+      where: { id: recipient.campaignId },
+      data: { opened: { increment: 1 } },
+    });
   }
   return recipient;
 }
 
 export async function listCampaignTraffic(options?: { campaignId?: string; take?: number }) {
   const take = options?.take ?? 200;
-  if (options?.campaignId) {
-    return prisma.$queryRaw<TrafficEvent[]>`
-      SELECT
-        t.id,
-        t.type,
-        t.url,
-        t.label,
-        t."createdAt",
-        t."customerId",
-        c.name AS "customerName",
-        c.email AS "customerEmail",
-        t."campaignId",
-        p.name AS "campaignName"
-      FROM "CampaignTraffic" t
-      JOIN "Customer" c ON c.id = t."customerId"
-      JOIN "Campaign" p ON p.id = t."campaignId"
-      WHERE t."campaignId" = ${options.campaignId}
-      ORDER BY t."createdAt" DESC
-      LIMIT ${take}
-    `;
-  }
-  return prisma.$queryRaw<TrafficEvent[]>`
-    SELECT
-      t.id,
-      t.type,
-      t.url,
-      t.label,
-      t."createdAt",
-      t."customerId",
-      c.name AS "customerName",
-      c.email AS "customerEmail",
-      t."campaignId",
-      p.name AS "campaignName"
-    FROM "CampaignTraffic" t
-    JOIN "Customer" c ON c.id = t."customerId"
-    JOIN "Campaign" p ON p.id = t."campaignId"
-    ORDER BY t."createdAt" DESC
-    LIMIT ${take}
-  `;
+  const rows = await prisma.campaignTraffic.findMany({
+    where: options?.campaignId ? { campaignId: options.campaignId } : undefined,
+    include: {
+      customer: { select: { name: true, email: true } },
+      campaign: { select: { name: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take,
+  });
+  return rows.map(
+    (row): TrafficEvent => ({
+      id: row.id,
+      type: row.type,
+      url: row.url,
+      label: row.label,
+      createdAt: row.createdAt,
+      customerId: row.customerId,
+      customerName: row.customer.name,
+      customerEmail: row.customer.email,
+      campaignId: row.campaignId,
+      campaignName: row.campaign.name,
+    }),
+  );
 }
 
 export async function trafficSummary(campaignId?: string) {
-  if (campaignId) {
-    const [clicks, opens, clickers] = await Promise.all([
-      prisma.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(*)::bigint AS count FROM "CampaignTraffic" WHERE type = 'CLICK' AND "campaignId" = ${campaignId}`,
-      prisma.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(*)::bigint AS count FROM "CampaignTraffic" WHERE type = 'OPEN' AND "campaignId" = ${campaignId}`,
-      prisma.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(*)::bigint AS count FROM "CampaignRecipient" WHERE clicked = true AND "campaignId" = ${campaignId}`,
-    ]);
-    return {
-      clicks: Number(clicks[0]?.count ?? 0),
-      opens: Number(opens[0]?.count ?? 0),
-      clickers: Number(clickers[0]?.count ?? 0),
-    };
-  }
+  const where = campaignId ? { campaignId } : {};
   const [clicks, opens, clickers] = await Promise.all([
-    prisma.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(*)::bigint AS count FROM "CampaignTraffic" WHERE type = 'CLICK'`,
-    prisma.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(*)::bigint AS count FROM "CampaignTraffic" WHERE type = 'OPEN'`,
-    prisma.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(*)::bigint AS count FROM "CampaignRecipient" WHERE clicked = true`,
+    prisma.campaignTraffic.count({ where: { ...where, type: "CLICK" } }),
+    prisma.campaignTraffic.count({ where: { ...where, type: "OPEN" } }),
+    prisma.campaignRecipient.count({ where: { ...where, clicked: true } }),
   ]);
-  return {
-    clicks: Number(clicks[0]?.count ?? 0),
-    opens: Number(opens[0]?.count ?? 0),
-    clickers: Number(clickers[0]?.count ?? 0),
-  };
+  return { clicks, opens, clickers };
 }
 
 export async function deleteTrafficEvent(id: string) {

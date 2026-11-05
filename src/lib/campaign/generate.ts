@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { generatePersonalizedEmail } from "@/lib/ai/provider";
+import { asStringArray } from "@/lib/json-array";
 import { formatCurrency, slugify, withUtm, zonedDayRange, STORE_TIMEZONE } from "@/lib/utils";
 import { loadStockProducts, matchStockForVehicle, vehicleCacheKey, vehicleFromOrderItem } from "@/lib/campaign/match-stock";
 import { resolveProductLink, isStoreHome } from "@/lib/catalogue/product-url";
@@ -134,11 +135,11 @@ async function generateFromOrderRange(
     if (byCustomer.has(customer.id)) continue;
     const vehicle = vehicleFromOrderItem(item);
     if (!vehicle) continue;
+    const filterSeries = asStringArray(filterVehicle?.series);
     if (
       filterVehicle &&
       (vehicle.profile.make?.toLowerCase() !== filterVehicle.make.toLowerCase() ||
-        (filterVehicle.series.length > 0 &&
-          !filterVehicle.series.some((code) => vehicle.profile.series.includes(code))))
+        (filterSeries.length > 0 && !filterSeries.some((code) => vehicle.profile.series.includes(code))))
     ) {
       continue;
     }
@@ -389,7 +390,7 @@ async function generateFromRecommendations(
       customerName: customer.name,
       vehicle: vehicle.canonicalName,
       make: vehicle.make,
-      series: vehicle.series.join("/"),
+      series: asStringArray(vehicle.series).join("/"),
       purchasedProduct: lastItem?.productName ?? "",
       products,
       campaignType: input.type ?? "CROSS_SELL",

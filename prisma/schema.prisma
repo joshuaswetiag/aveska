@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -128,8 +128,8 @@ model Customer {
   firstName          String?
   lastName           String?
   totalOrders        Int                  @default(0)
-  totalSpend         Decimal              @default(0) @db.Decimal(12, 2)
-  averageOrderValue  Decimal              @default(0) @db.Decimal(12, 2)
+  totalSpend         Decimal              @default(0)
+  averageOrderValue  Decimal              @default(0)
   firstPurchaseAt    DateTime?
   lastPurchaseAt     DateTime?
   productCount       Int                  @default(0)
@@ -160,7 +160,7 @@ model Order {
   customerId    String
   customer      Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
   orderDate     DateTime?
-  orderTotal    Decimal?    @db.Decimal(12, 2)
+  orderTotal    Decimal?   
   sourceRowHash String?
   importJobId   String?
   originalData  Json?
@@ -185,12 +185,12 @@ model OrderItem {
   productName           String
   productNameRaw        String
   quantity              Int      @default(1)
-  unitPrice             Decimal? @db.Decimal(12, 2)
-  lineTotal             Decimal? @db.Decimal(12, 2)
+  unitPrice             Decimal?
+  lineTotal             Decimal?
   productUrl            String?
   category              String?
   extractedVehicle      Json?
-  extractionConfidence  Decimal? @db.Decimal(5, 4)
+  extractionConfidence  Decimal?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
@@ -213,21 +213,21 @@ model Product {
   category       String?
   subcategory    String?
   brand          String?
-  price          Decimal?          @db.Decimal(12, 2)
+  price          Decimal?         
   stock          Int?
   stockStatus    StockStatus       @default(UNKNOWN)
   make           String?
   model          String?
   vehicleFamily  String?
-  series         String[]          @default([])
+  series         Json              @default("[]")
   bodyType       String?
   yearFrom       Int?
   yearTo         Int?
   engine         String?
   fitment        String?
-  aliases        String[]          @default([])
-  searchableText String?           @db.Text
-  tags           String[]          @default([])
+  aliases        Json              @default("[]")
+  searchableText String?
+  tags           Json              @default("[]")
   discontinued   Boolean           @default(false)
   originalData   Json?
   importJobId    String?
@@ -255,7 +255,7 @@ model Vehicle {
   make             String
   model            String?
   vehicleFamily    String?
-  series           String[]           @default([])
+  series           Json               @default("[]")
   generation       String?
   bodyType         String?
   yearFrom         Int?
@@ -266,7 +266,7 @@ model Vehicle {
   driveType        String?
   application      String?
   canonicalName    String             @unique
-  searchableText   String             @db.Text
+  searchableText   String            
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
   aliases          VehicleAlias[]
@@ -301,7 +301,7 @@ model ProductFitment {
   vehicleId  String
   vehicle    Vehicle    @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
   source     String
-  confidence Decimal    @db.Decimal(5, 4)
+  confidence Decimal   
   matchLevel MatchLevel
   notes      String?
   isNegative Boolean    @default(false)
@@ -319,7 +319,7 @@ model FitmentOverride {
   product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   make          String?
   model         String?
-  series        String[] @default([])
+  series        Json     @default("[]")
   vehicleFamily String?
   bodyType      String?
   isCompatible  Boolean
@@ -337,10 +337,10 @@ model CustomerVehicle {
   customer        Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
   vehicleId       String
   vehicle         Vehicle          @relation(fields: [vehicleId], references: [id])
-  confidence      Decimal          @db.Decimal(5, 4)
+  confidence      Decimal         
   source          String
   isPrimary       Boolean          @default(false)
-  mergedFromIds   String[]         @default([])
+  mergedFromIds   Json             @default("[]")
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   recommendations Recommendation[]
@@ -361,10 +361,10 @@ model Recommendation {
   productId          String
   product            Product                @relation(fields: [productId], references: [id])
   purchasedProductId String?
-  score              Decimal                @db.Decimal(5, 2)
-  scoreRaw           Decimal                @db.Decimal(8, 2)
+  score              Decimal               
+  scoreRaw           Decimal               
   matchLevel         MatchLevel
-  confidence         Decimal                @db.Decimal(5, 4)
+  confidence         Decimal               
   status             RecommendationStatus    @default(GENERATED)
   feedbackNote       String?
   createdAt          DateTime               @default(now())
@@ -425,8 +425,8 @@ model Campaign {
   vehicleFilter   String?
   subject         String?
   preheader       String?
-  bodyHtml        String?             @db.Text
-  bodyText        String?             @db.Text
+  bodyHtml        String?            
+  bodyText        String?            
   ctaLabel        String?
   ctaUrl          String?
   fromName        String?
@@ -445,7 +445,7 @@ model Campaign {
   bounced         Int                 @default(0)
   unsubscribed    Int                 @default(0)
   converted       Int                 @default(0)
-  revenue         Decimal             @default(0) @db.Decimal(12, 2)
+  revenue         Decimal             @default(0)
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
   recipients      CampaignRecipient[]
@@ -467,7 +467,7 @@ model CampaignRecipient {
   purchasedProduct String?
   subject          String?
   preheader        String?
-  bodyHtml         String?   @db.Text
+  bodyHtml         String?  
   personalized     Json?
   sent             Boolean   @default(false)
   sentAt           DateTime?
@@ -481,7 +481,7 @@ model CampaignRecipient {
   bounced          Boolean   @default(false)
   unsubscribed     Boolean   @default(false)
   converted        Boolean   @default(false)
-  revenue          Decimal   @default(0) @db.Decimal(12, 2)
+  revenue          Decimal   @default(0)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   traffic          CampaignTraffic[]
@@ -531,7 +531,7 @@ model EmailTemplate {
   type      CampaignType
   subject   String
   preheader String?
-  bodyHtml  String       @db.Text
+  bodyHtml  String      
   ctaLabel  String?
   ctaUrl    String?
   isDefault Boolean      @default(false)
@@ -636,7 +636,7 @@ model AuditLog {
 model Settings {
   id                      String   @id @default("default")
   cooldownDays            Int      @default(90)
-  confidenceThreshold     Decimal  @default(0.85) @db.Decimal(5, 4)
+  confidenceThreshold     Decimal  @default(0.85)
   includeOutOfStock       Boolean  @default(false)
   utmEnabled              Boolean  @default(true)
   shopUrl                 String?

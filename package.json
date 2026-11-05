@@ -12,14 +12,15 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:start": "pg_ctl start",
-    "db:stop": "pg_ctl stop",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "worker": "tsx src/lib/jobs/worker.ts",
+    "cf:migrate:local": "wrangler d1 migrations apply DB --local",
+    "cf:migrate": "wrangler d1 migrations apply DB --remote",
+    "deploy": "npm run build && wrangler deploy",
     "track:tunnel": "tsx scripts/tracking-tunnel.ts"
   },
   "prisma": {
@@ -27,6 +28,7 @@
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
+    "@prisma/adapter-d1": "^6.19.3",
     "@prisma/client": "6.19.3",
     "@radix-ui/react-accordion": "^1.2.20",
     "@radix-ui/react-alert-dialog": "^1.1.23",
@@ -67,10 +69,12 @@
     "tailwind-merge": "^3.6.0",
     "tsx": "^4.23.12",
     "vaul": "^1.1.2",
+    "wrangler": "^4.152.0",
     "xlsx": "^0.18.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261025.1",
     "@tailwindcss/postcss": "^4",
     "@tailwindcss/vite": "^4.3.3",
     "@types/bcryptjs": "^3.0.0",

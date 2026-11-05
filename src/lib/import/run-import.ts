@@ -104,7 +104,7 @@ export async function importOrders(importJobId: string, rows: ParsedRow[], mappi
           ? await prisma.product.findFirst({ where: { skuNormalized: normalizeKey(sku) } })
           : null) ??
         (await prisma.product.findFirst({
-          where: { name: { equals: productNameRaw, mode: "insensitive" } },
+          where: { name: { equals: productNameRaw } },
         }));
 
       const orderDate = parseDate(mapped.order_date);

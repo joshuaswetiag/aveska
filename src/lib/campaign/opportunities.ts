@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { asStringArray } from "@/lib/json-array";
 
 export type OpportunityGroup = {
   name: string;
@@ -10,41 +11,69 @@ export type OpportunityGroup = {
   potentialProducts: number;
 };
 
-type RawGroup = {
-  name: string;
-  make: string | null;
-  customers: number;
-  eligible: number;
-  order_lines: number;
+type ExtractedVehicle = {
+  make?: string | null;
+  model?: string | null;
+  vehicleFamily?: string | null;
+  series?: unknown;
+  application?: string | null;
 };
 
+function hasVehicleSignal(extracted: ExtractedVehicle | null | undefined) {
+  if (!extracted) return false;
+  const make = (extracted.make ?? "").trim();
+  if (!make) return false;
+  return (
+    asStringArray(extracted.series).length > 0 ||
+    Boolean((extracted.vehicleFamily ?? "").trim()) ||
+    Boolean((extracted.model ?? "").trim())
+  );
+}
+
 export async function getCrossSellOpportunities(limit = 80): Promise<OpportunityGroup[]> {
-  const rows = await prisma.$queryRaw<RawGroup[]>`
-    SELECT
-      COALESCE(NULLIF(oi."extractedVehicle"->>'application', ''), 'Unknown vehicle') AS name,
-      NULLIF(oi."extractedVehicle"->>'make', '') AS make,
-      COUNT(DISTINCT o."customerId")::int AS customers,
-      COUNT(DISTINCT c.id) FILTER (
-        WHERE c."isSuppressed" = false AND c."emailNormalized" IS NOT NULL
-      )::int AS eligible,
-      COUNT(*)::int AS order_lines
-    FROM "OrderItem" oi
-    JOIN "Order" o ON o.id = oi."orderId"
-    JOIN "Customer" c ON c.id = o."customerId"
-    WHERE COALESCE(oi."extractedVehicle"->>'make', '') <> ''
-      AND (
-        (
-          jsonb_typeof(oi."extractedVehicle"->'series') = 'array'
-          AND jsonb_array_length(oi."extractedVehicle"->'series') > 0
-        )
-        OR COALESCE(oi."extractedVehicle"->>'vehicleFamily', '') <> ''
-        OR COALESCE(oi."extractedVehicle"->>'model', '') <> ''
-      )
-      AND COALESCE(oi."extractionConfidence", 0) >= 0.5
-    GROUP BY 1, 2
-    ORDER BY COUNT(DISTINCT o."customerId") DESC
-    LIMIT ${limit}
-  `;
+  const items = await prisma.orderItem.findMany({
+    where: { extractionConfidence: { gte: 0.5 } },
+    select: {
+      extractedVehicle: true,
+      order: {
+        select: {
+          customerId: true,
+          customer: { select: { id: true, isSuppressed: true, emailNormalized: true } },
+        },
+      },
+    },
+  });
+
+  type Acc = { make: string | null; customers: Set<string>; eligible: Set<string>; orderLines: number };
+  const groups = new Map<string, Acc>();
+
+  for (const item of items) {
+    const extracted = item.extractedVehicle as ExtractedVehicle | null;
+    if (!hasVehicleSignal(extracted)) continue;
+    const name = (extracted?.application ?? "").trim() || "Unknown vehicle";
+    const make = (extracted?.make ?? "").trim() || null;
+    let group = groups.get(name);
+    if (!group) {
+      group = { make, customers: new Set(), eligible: new Set(), orderLines: 0 };
+      groups.set(name, group);
+    }
+    group.orderLines += 1;
+    const customerId = item.order.customerId;
+    group.customers.add(customerId);
+    const customer = item.order.customer;
+    if (!customer.isSuppressed && customer.emailNormalized) group.eligible.add(customer.id);
+  }
+
+  const rows = [...groups.entries()]
+    .map(([name, group]) => ({
+      name,
+      make: group.make,
+      customers: group.customers.size,
+      eligible: group.eligible.size,
+      order_lines: group.orderLines,
+    }))
+    .sort((a, b) => b.customers - a.customers)
+    .slice(0, limit);
 
   const names = rows.map((row) => row.name).filter(Boolean);
   const vehicles = names.length

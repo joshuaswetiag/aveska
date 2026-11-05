@@ -43,6 +43,13 @@ yarn-error.log*
 # vercel
 .vercel
 
+# cloudflare
+.wrangler
+.wrangler-bundle
+.dev.vars
+prisma/*.db
+prisma/*.db-journal
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

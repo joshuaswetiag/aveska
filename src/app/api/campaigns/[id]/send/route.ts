@@ -6,7 +6,7 @@ import { enqueueJob } from "@/lib/jobs/queue";
 import { runJobInBackground } from "@/lib/jobs/run-in-background";
 import { formatFromHeader, getMailConfig } from "@/lib/email/config";
 import { loadMailSettings } from "@/lib/email/settings-store";
-import { eligibleRecipients } from "@/lib/campaign/send-targets";
+import { eligibleRecipients, isEbayMemberEmail } from "@/lib/campaign/send-targets";
 import { normalizeEmail } from "@/lib/utils";
 
 const SENDABLE = new Set(["APPROVED", "EXPORTED", "SENDING", "SENT"]);
@@ -26,16 +26,19 @@ async function sendSummary(campaignId: string) {
   const suppressed = new Set(
     (await prisma.suppression.findMany({ select: { emailNormalized: true } })).map((row) => row.emailNormalized),
   );
-  const pending = eligibleRecipients(
-    campaign.recipients.map((row) => ({
-      id: row.id,
-      email: row.customer.email,
-      emailNormalized: row.customer.emailNormalized,
-      isSuppressed: row.customer.isSuppressed,
-      sent: row.sent,
-    })),
-    suppressed,
-  ).length;
+  const mapped = campaign.recipients.map((row) => ({
+    id: row.id,
+    email: row.customer.email,
+    emailNormalized: row.customer.emailNormalized,
+    isSuppressed: row.customer.isSuppressed,
+    sent: row.sent,
+  }));
+  const pending = eligibleRecipients(mapped, suppressed).length;
+  const ebaySkipped = campaign.recipients.filter((row) => {
+    if (row.sent) return false;
+    const email = row.customer.emailNormalized ?? normalizeEmail(row.customer.email);
+    return isEbayMemberEmail(email);
+  }).length;
   const sent = campaign.recipients.filter((row) => row.sent).length;
   const failed = campaign.recipients.filter((row) => row.sendError && !row.sent).length;
   const running = await prisma.job.findFirst({
@@ -51,6 +54,7 @@ async function sendSummary(campaignId: string) {
     provider: config.provider,
     from: formatFromHeader(config),
     pending,
+    ebaySkipped,
     sent,
     failed,
     total: campaign.recipients.length,

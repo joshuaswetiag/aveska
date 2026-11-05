@@ -1,0 +1,33 @@
+name = "aveska"
+main = "src/worker.ts"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "aveska"
+database_id = "d027caa8-f35a-4058-8ec7-ee1527a45dfa"
+migrations_dir = "migrations"
+
+# Enable R2 in the Cloudflare dashboard, then uncomment:
+# [[r2_buckets]]
+# binding = "UPLOADS"
+# bucket_name = "aveska-uploads"
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+EMAIL_PROVIDER = "resend"
+NEXT_PUBLIC_APP_NAME = "Aveska Intelligence"
+NEXT_PUBLIC_COMPANY_NAME = "Aveska"
+MAX_UPLOAD_MB = "25"
+AVESKA_RUNTIME = "worker"
+
+# Set secrets with: npx wrangler secret put AUTH_SECRET
+# AUTH_URL, TRACKING_URL, RESEND_API_KEY, SMTP_FROM, ADMIN_EMAIL, ADMIN_PASSWORD, NETO_*

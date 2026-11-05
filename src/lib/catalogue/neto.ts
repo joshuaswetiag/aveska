@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
+import { asStringArray } from "@/lib/json-array";
 import { extractVehicle } from "@/lib/vehicle/extract";
-import { upsertVehicleFromExtraction, pruneProductTitleVehicles, pruneOrphanVehicles } from "@/lib/vehicle/persist";
 import { looksLikeProductTitle } from "@/lib/vehicle/dictionary";
 import { normalizeKey, normalizeWhitespace, parseNumber } from "@/lib/utils";
 import { productPageUrl } from "@/lib/catalogue/product-url";
@@ -167,18 +167,67 @@ export async function fetchNetoProductPage(page: number, pageSize = 100) {
   };
 }
 
-export async function syncNetoCatalogue(onProgress?: (done: number, total: number, message?: string) => Promise<void>) {
-  const pageSize = 100;
-  let page = 0;
-  let imported = 0;
+export type CatalogueSyncOptions = {
+  extractVehicles?: boolean;
+  startPage?: number;
+  maxPages?: number;
+  timeBudgetMs?: number;
+  importedSoFar?: number;
+  pageSize?: number;
+  /** Called after each Neto page is saved, so a killed Worker can resume. */
+  onPage?: (info: { nextPage: number; imported: number; total: number }) => Promise<void>;
+};
+
+export async function syncNetoCatalogue(
+  onProgress?: (done: number, total: number, message?: string) => Promise<void>,
+  options?: CatalogueSyncOptions,
+) {
+  const extractVehicles = options?.extractVehicles !== false;
+  // Neto often returns TotalRecords=0; only an empty page means the catalogue is finished.
+  // Keep pages modest so a Worker can finish and checkpoint before it is cancelled.
+  const pageSize = options?.pageSize || Number(process.env.NETO_PRODUCT_PAGE_SIZE ?? 80) || 80;
+  const maxPages = options?.maxPages ?? Number.POSITIVE_INFINITY;
+  const deadline = options?.timeBudgetMs ? Date.now() + options.timeBudgetMs : Number.POSITIVE_INFINITY;
+  let page = options?.startPage ?? 0;
+  let imported = options?.importedSoFar ?? 0;
   let created = 0;
   let updated = 0;
   let total = 0;
+  let pagesRun = 0;
+  let done = false;
 
-  for (;;) {
+  while (pagesRun < maxPages && Date.now() < deadline) {
     const { items, totalRecords } = await fetchNetoProductPage(page, pageSize);
+    // Neto frequently omits TotalRecords (0). Keep a rising estimate for progress UI.
     if (totalRecords > total) total = totalRecords;
-    if (!items.length) break;
+    if (!total) total = Math.max(imported + items.length, page * pageSize + items.length);
+    if (!items.length) {
+      done = true;
+      break;
+    }
+
+    const skuKeys = items
+      .map((item) => (item.SKU?.trim() ? normalizeKey(item.SKU.trim()) : ""))
+      .filter(Boolean);
+    const existingRows = skuKeys.length
+      ? await prisma.product.findMany({
+          where: { skuNormalized: { in: skuKeys } },
+          select: {
+            id: true,
+            skuNormalized: true,
+            make: true,
+            model: true,
+            vehicleFamily: true,
+            series: true,
+            bodyType: true,
+            yearFrom: true,
+            yearTo: true,
+          },
+        })
+      : [];
+    const bySku = new Map(
+      existingRows.filter((row) => row.skuNormalized).map((row) => [row.skuNormalized as string, row]),
+    );
 
     for (const item of items) {
       const sku = item.SKU?.trim();
@@ -188,8 +237,38 @@ export async function syncNetoCatalogue(onProgress?: (done: number, total: numbe
       const category = categoryName(item);
       const qty = stockQty(item);
       const url = productUrl(item);
-      const description = item.Description ? String(item.Description) : null;
-      const searchableText = [name, sku, item.Brand, item.Model, description, category].filter(Boolean).join(" ").toLowerCase();
+      const description = item.Description ? String(item.Description).slice(0, 1500) : null;
+      const brand = item.Brand ? String(item.Brand) : null;
+      const modelHint = item.Model && String(item.Model).split(" ").length <= 3 ? String(item.Model) : null;
+      const fitment = item.Model ? String(item.Model) : null;
+      const searchableText = [name, sku, item.Brand, item.Model, category]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .slice(0, 500);
+
+      const existing = bySku.get(skuNormalized);
+      const existingSeries = asStringArray(existing?.series);
+      const extraction = extractVehicle({
+        name,
+        description,
+        sku,
+        category,
+        fitment,
+        make: existing?.make,
+        model: modelHint ?? existing?.model,
+        series: existingSeries,
+        bodyType: existing?.bodyType,
+      });
+      const keepModel =
+        typeof existing?.model === "string" &&
+        !looksLikeProductTitle(existing.model) &&
+        existing.model.trim().split(/\s+/).length <= 3;
+      const keepFamily =
+        typeof existing?.vehicleFamily === "string" &&
+        !looksLikeProductTitle(existing.vehicleFamily) &&
+        existing.vehicleFamily.trim().split(/\s+/).length <= 3;
+
       const data = {
         sku,
         skuNormalized,
@@ -201,83 +280,67 @@ export async function syncNetoCatalogue(onProgress?: (done: number, total: numbe
         url,
         imageUrl: firstImage(item),
         category,
-        brand: item.Brand ? String(item.Brand) : null,
-        model: item.Model && String(item.Model).split(" ").length <= 3 ? String(item.Model) : null,
-        vehicleFamily: null,
-        fitment: item.Model ? String(item.Model) : null,
+        brand,
+        model: keepModel ? existing!.model : modelHint ?? extraction.model,
+        vehicleFamily: keepFamily ? existing!.vehicleFamily : extraction.vehicleFamily,
+        fitment,
+        make: existing?.make ?? extraction.make,
+        series: existingSeries.length ? existingSeries : extraction.series,
+        bodyType: existing?.bodyType ?? extraction.bodyType,
+        yearFrom: existing?.yearFrom ?? extraction.yearFrom,
+        yearTo: existing?.yearTo ?? extraction.yearTo,
         price: parseNumber(item.DefaultPrice) ?? parseNumber(item.PromotionPrice),
         stock: qty,
         stockStatus: stockStatus(item),
         searchableText,
-        originalData: item as object,
       };
 
-      const existing = await prisma.product.findFirst({ where: { skuNormalized } });
-      const product = existing
-        ? await prisma.product.update({ where: { id: existing.id }, data })
-        : await prisma.product.create({ data });
-      if (existing) updated += 1;
-      else created += 1;
-
-      const extraction = extractVehicle({
-        name: product.name,
-        description: product.description,
-        sku: product.sku,
-        category: product.category,
-        fitment: product.fitment,
-        make: product.make,
-        model: product.model,
-        series: product.series,
-        bodyType: product.bodyType,
-      });
-      if (extraction.make || extraction.vehicleFamily || extraction.series.length) {
-        await prisma.product.update({
-          where: { id: product.id },
-          data: {
-            make: extraction.make ?? product.make,
-            model: looksLikeProductTitle(product.model) ? extraction.model : product.model ?? extraction.model,
-            vehicleFamily: looksLikeProductTitle(product.vehicleFamily)
-              ? extraction.vehicleFamily
-              : product.vehicleFamily ?? extraction.vehicleFamily,
-            series: product.series.length ? product.series : extraction.series,
-            bodyType: product.bodyType ?? extraction.bodyType,
-            yearFrom: product.yearFrom ?? extraction.yearFrom,
-            yearTo: product.yearTo ?? extraction.yearTo,
-          },
-        });
+      if (existing) {
+        await prisma.product.update({ where: { id: existing.id }, data });
+        updated += 1;
+      } else {
+        await prisma.product.create({ data });
+        created += 1;
       }
-      const vehicle = await upsertVehicleFromExtraction(extraction);
-      if (vehicle && extraction.confidence >= 0.5) {
-        await prisma.productFitment.upsert({
-          where: {
-            productId_vehicleId_isNegative: { productId: product.id, vehicleId: vehicle.id, isNegative: false },
-          },
-          update: { confidence: extraction.confidence, source: "neto" },
-          create: {
-            productId: product.id,
-            vehicleId: vehicle.id,
-            source: "neto",
-            confidence: extraction.confidence,
-            matchLevel: extraction.series.length ? "EXACT" : "SAME_FAMILY",
-          },
-        });
-      }
-
       imported += 1;
     }
 
-    if (onProgress) {
-      await onProgress(imported, total || imported, `Imported ${imported.toLocaleString()} live products`);
-    }
-    if (items.length < pageSize) break;
+    pagesRun += 1;
     page += 1;
-    if (page > 500) break;
+    const progressTotal = Math.max(total || imported, imported + pageSize, 12_000);
+    if (onProgress) {
+      await onProgress(imported, progressTotal, `Imported ${imported.toLocaleString()} live products`);
+    }
+    await options?.onPage?.({ nextPage: page, imported, total: progressTotal });
+    // Only an empty page means we are finished. A short page is not the end.
+    if (page > 500) {
+      done = true;
+      break;
+    }
+    if (Date.now() >= deadline) break;
   }
 
-  await pruneProductTitleVehicles();
-  await pruneOrphanVehicles();
+  if (done && extractVehicles) {
+    if (onProgress) await onProgress(imported, total || imported, "Matching vehicles from products…");
+    const { extractCatalogueFitments } = await import("@/lib/vehicle/persist");
+    await extractCatalogueFitments(async (doneFit, fitTotal) => {
+      await onProgress?.(
+        imported,
+        total || imported,
+        `Matching vehicles ${doneFit.toLocaleString()} / ${fitTotal.toLocaleString()}`,
+      );
+    });
+  }
 
-  return { imported, created, updated, pages: page + 1 };
+  return {
+    imported,
+    created,
+    updated,
+    pages: pagesRun,
+    nextPage: page,
+    done,
+    total: total || imported,
+  };
 }
 
 export async function syncNetoProductUrls(onProgress?: (done: number, total: number, message?: string) => Promise<void>) {

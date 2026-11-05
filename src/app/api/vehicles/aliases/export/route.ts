@@ -2,6 +2,7 @@ import { NextResponse } from "@/server/next-response";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
 import { toCsv } from "@/lib/import/parse-file";
+import { asStringArray } from "@/lib/json-array";
 
 export async function GET() {
   const session = await auth();
@@ -11,7 +12,7 @@ export async function GET() {
     aliases.map((a) => ({
       canonical: a.vehicle.canonicalName,
       make: a.vehicle.make,
-      series: a.vehicle.series.join("/"),
+      series: asStringArray(a.vehicle.series).join("/"),
       alias: a.alias,
     })),
   );

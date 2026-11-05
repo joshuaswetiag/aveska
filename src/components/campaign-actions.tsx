@@ -10,6 +10,7 @@ type SendSummary = {
   provider: string;
   from: string;
   pending: number;
+  ebaySkipped: number;
   sent: number;
   failed: number;
   total: number;
@@ -101,9 +102,14 @@ export function CampaignActions({ id, status }: { id: string; status: string }) 
         disabled={pending || !canSend || Boolean(mail?.runningJobId) || (mail?.pending ?? 0) === 0}
         onClick={() => {
           const count = mail?.pending ?? 0;
+          const ebay = mail?.ebaySkipped ?? 0;
+          const ebayNote =
+            ebay > 0
+              ? `\n\n${ebay.toLocaleString()} eBay (@members.ebay.com) email${ebay === 1 ? "" : "s"} detected and will be ignored.`
+              : "\n\nAlready-sent, suppressed, and eBay (@members.ebay.com) addresses are skipped.";
           if (
             !window.confirm(
-              `Send ${count.toLocaleString()} personalized email${count === 1 ? "" : "s"} from ${mail?.from ?? "Aveska"} via ${mail?.provider.toUpperCase()}?\n\nAlready-sent and suppressed addresses are skipped. This cannot be undone.`,
+              `Send ${count.toLocaleString()} personalized email${count === 1 ? "" : "s"} from ${mail?.from ?? "Aveska"} via ${mail?.provider.toUpperCase()}?${ebayNote}\n\nThis cannot be undone.`,
             )
           ) {
             return;
@@ -133,7 +139,18 @@ export function CampaignActions({ id, status }: { id: string; status: string }) 
       ) : null}
       {mail?.configured ? (
         <p className="basis-full text-sm text-muted-foreground">
-          {mail.sent.toLocaleString()} sent · {mail.pending.toLocaleString()} remaining · {mail.failed.toLocaleString()} failed · from {mail.from}
+          {mail.sent.toLocaleString()} sent · {mail.pending.toLocaleString()} remaining · {mail.failed.toLocaleString()}{" "}
+          failed · from {mail.from}
+          {mail.ebaySkipped > 0 ? (
+            <>
+              {" "}
+              ·{" "}
+              <span className="text-amber-700 dark:text-amber-400">
+                {mail.ebaySkipped.toLocaleString()} eBay email{mail.ebaySkipped === 1 ? "" : "s"} detected — ignored for
+                send
+              </span>
+            </>
+          ) : null}
         </p>
       ) : null}
     </div>

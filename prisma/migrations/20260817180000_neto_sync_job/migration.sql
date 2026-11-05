@@ -1,2 +1,0 @@
--- AlterEnum
-ALTER TYPE "JobType" ADD VALUE IF NOT EXISTS 'NETO_SYNC';

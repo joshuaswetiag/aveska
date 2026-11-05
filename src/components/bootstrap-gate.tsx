@@ -78,7 +78,10 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
     try {
       return JSON.parse(text) as BootstrapStatus & { error?: string };
     } catch {
-      throw new Error("The app returned an invalid response. Redeploy and try again.");
+      // Workers may return HTML when a long sync request is cancelled — keep polling.
+      return {
+        error: "Sync is still running on the server. Retrying…",
+      } as BootstrapStatus & { error?: string };
     }
   }
 
@@ -86,11 +89,21 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
     try {
       const res = await fetch("/api/bootstrap", { cache: "no-store" });
       let data = await readJson(res);
-      if (!res.ok) {
-        setStatus((current) => current ?? { ...EMPTY_STATUS, netoConfigured: data.netoConfigured ?? false, needsSync: true, ready: false, job: null });
+      if (!res.ok || !("ready" in data)) {
+        // Keep prior status on transient failures — never flip netoConfigured to false here.
+        setStatus((current) => {
+          if (current) return current;
+          return {
+            ...EMPTY_STATUS,
+            netoConfigured: data.netoConfigured ?? true,
+            needsSync: true,
+            ready: false,
+            job: null,
+          };
+        });
         setError(data.error ?? "Could not check Aveska sync");
         setChecking(false);
-        return data;
+        return data.job || data.counts ? data : status;
       }
       if (startIfNeeded && data.netoConfigured && data.needsSync) {
         const posted = await fetch("/api/bootstrap", {
@@ -113,6 +126,7 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
       const jobId = data.job?.id;
       if (jobId && (data.job?.status === "QUEUED" || data.job?.status === "RUNNING") && !processing.current) {
         processing.current = true;
+        // Worker returns 202 immediately (work continues in waitUntil).
         void fetch(`/api/jobs/${jobId}/process`, { method: "POST", cache: "no-store" })
           .catch(() => undefined)
           .finally(() => {
@@ -122,8 +136,9 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
       return data;
     } catch (err) {
       setChecking(false);
+      // Soft-fail so the gate keeps polling instead of locking on a one-off parse error.
       setError(err instanceof Error ? err.message : "Could not reach the sync API");
-      return null;
+      return status ?? { ...EMPTY_STATUS, needsSync: true, ready: false, job: null };
     }
   }
 
@@ -171,7 +186,7 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
           Please wait while we sync products, customers, orders, revenue, and vehicles from aveska.com.au.
           The dashboard opens when this finishes.
         </p>
-        {status && !status.netoConfigured ? (
+        {status && status.netoConfigured === false && !status.job && status.counts.products === 0 ? (
           <p className="mt-4 text-sm text-danger">
             This running app does not have NETO_API_KEY yet. After adding it on the aveska service, click Redeploy, then refresh.
           </p>
@@ -234,7 +249,17 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
         {failed || error || !status?.job ? (
           <div className="mt-5 space-y-3">
             {error || status?.job?.errorMessage ? (
-              <p className="text-sm text-danger">{error || status?.job?.errorMessage}</p>
+              <p
+                className={
+                  /retrying|still running|invalid response/i.test(error || status?.job?.errorMessage || "")
+                    ? "text-sm text-muted-foreground"
+                    : "text-sm text-danger"
+                }
+              >
+                {/invalid response/i.test(error || "")
+                  ? "Sync is still running on the server. Retrying…"
+                  : error || status?.job?.errorMessage}
+              </p>
             ) : null}
             <Button
               onClick={async () => {

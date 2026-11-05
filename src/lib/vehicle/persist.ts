@@ -1,19 +1,20 @@
 import { prisma } from "@/lib/db";
+import { asStringArray, toJsonArray } from "@/lib/json-array";
 import type { LearnedVehicleKnowledge, VehicleExtraction } from "@/types";
 import { extractVehicle, canonicalVehicleName, vehicleSearchText, isIdentifiedVehicle } from "@/lib/vehicle/extract";
 import { looksLikeProductTitle } from "@/lib/vehicle/dictionary";
 import { normalizeKey, unique } from "@/lib/utils";
 
 export async function loadLearnedKnowledge(): Promise<LearnedVehicleKnowledge> {
-  const [products, aliases, vehicles] = await Promise.all([
+  const [allProducts, aliases, vehicles] = await Promise.all([
     prisma.product.findMany({
-      where: { OR: [{ make: { not: null } }, { series: { isEmpty: false } }] },
       select: { make: true, model: true, vehicleFamily: true, series: true },
       take: 20000,
     }),
     prisma.vehicleAlias.findMany({ include: { vehicle: true }, take: 20000 }),
     prisma.vehicle.findMany({ take: 20000 }),
   ]);
+  const products = allProducts.filter((p) => p.make || asStringArray(p.series).length > 0);
 
   const makes = unique(products.map((p) => p.make).filter(Boolean) as string[]);
   const families = unique(
@@ -34,13 +35,13 @@ export async function loadLearnedKnowledge(): Promise<LearnedVehicleKnowledge> {
     ...products.flatMap((p) => {
       const family = p.vehicleFamily ?? p.model ?? undefined;
       if (family && (looksLikeProductTitle(family) || family.trim().split(/\s+/).length > 3)) return [];
-      return p.series.map((code) => ({ make: p.make ?? undefined, family, code }));
+      return asStringArray(p.series).map((code) => ({ make: p.make ?? undefined, family, code }));
     }),
     ...vehicles.flatMap((v) => {
       const family = v.vehicleFamily ?? v.model ?? undefined;
       if (family && (looksLikeProductTitle(family) || family.trim().split(/\s+/).length > 3)) return [];
       if (looksLikeProductTitle(v.canonicalName)) return [];
-      return v.series.map((code) => ({ make: v.make, family, code }));
+      return asStringArray(v.series).map((code) => ({ make: v.make, family, code }));
     }),
   ];
 
@@ -52,7 +53,7 @@ export async function loadLearnedKnowledge(): Promise<LearnedVehicleKnowledge> {
       alias: a.alias,
       make: a.vehicle.make,
       family: a.vehicle.vehicleFamily ?? a.vehicle.model ?? undefined,
-      series: a.vehicle.series,
+      series: asStringArray(a.vehicle.series),
     })),
   };
 }
@@ -202,7 +203,7 @@ export async function backfillCustomerVehiclesFromOrders(
         confidence: row.confidence,
         source: "order_extraction",
       })),
-      skipDuplicates: true,
+      
     });
     if (onProgress) {
       await onProgress(
@@ -213,16 +214,16 @@ export async function backfillCustomerVehiclesFromOrders(
     }
   }
 
-  await prisma.$executeRaw`
-    UPDATE "Customer" AS c
-    SET "vehicleCount" = COALESCE(cv.count, 0)
-    FROM (
-      SELECT "customerId", COUNT(*)::int AS count
-      FROM "CustomerVehicle"
-      GROUP BY "customerId"
-    ) AS cv
-    WHERE c.id = cv."customerId"
-  `;
+  const counts = await prisma.customerVehicle.groupBy({
+    by: ["customerId"],
+    _count: { _all: true },
+  });
+  for (const row of counts) {
+    await prisma.customer.update({
+      where: { id: row.customerId },
+      data: { vehicleCount: row._count._all },
+    });
+  }
 
   return { items: total, vehicles: vehicleIds.size, links: rows.length };
 }
@@ -280,7 +281,7 @@ export async function extractCatalogueFitments(onProgress?: (done: number, total
         fitment: product.fitment,
         make: product.make,
         model: product.model,
-        series: product.series.length ? product.series : [],
+        series: asStringArray(product.series),
         bodyType: product.bodyType,
       },
       learned,
@@ -326,7 +327,7 @@ export async function extractCatalogueFitments(onProgress?: (done: number, total
         make: product.make ?? extraction.make,
         model: keepModel ? product.model : extraction.model,
         vehicleFamily: keepFamily ? product.vehicleFamily : extraction.vehicleFamily,
-        series: extraction.series.length ? extraction.series : product.series,
+        series: extraction.series.length ? extraction.series : asStringArray(product.series),
         bodyType: product.bodyType ?? extraction.bodyType,
         yearFrom: product.yearFrom ?? extraction.yearFrom,
         yearTo: product.yearTo ?? extraction.yearTo,
@@ -347,7 +348,7 @@ export async function extractCatalogueFitments(onProgress?: (done: number, total
   for (let index = 0; index < vehicleList.length; index += 200) {
     await prisma.vehicle.createMany({
       data: vehicleList.slice(index, index + 200),
-      skipDuplicates: true,
+      
     });
   }
 
@@ -381,7 +382,7 @@ export async function extractCatalogueFitments(onProgress?: (done: number, total
   for (let index = 0; index < fitments.length; index += 200) {
     await prisma.productFitment.createMany({
       data: fitments.slice(index, index + 200),
-      skipDuplicates: true,
+      
     });
   }
 
@@ -450,7 +451,7 @@ export async function harvestVehiclesFromOrderLines(
                 category: item.category,
                 make: item.product?.make,
                 model: item.product?.model,
-                series: item.product?.series,
+                series: asStringArray(item.product?.series),
                 fitment: item.product?.fitment,
                 bodyType: item.product?.bodyType,
               },
@@ -488,7 +489,7 @@ export async function harvestVehiclesFromOrderLines(
   for (let index = 0; index < rows.length; index += 200) {
     await prisma.vehicle.createMany({
       data: rows.slice(index, index + 200),
-      skipDuplicates: true,
+      
     });
   }
   return { scanned, created: rows.length };
@@ -519,7 +520,7 @@ export async function extractOrderVehicles(onProgress?: (done: number, total: nu
           category: item.category,
           make: item.product?.make,
           model: item.product?.model,
-          series: item.product?.series,
+          series: asStringArray(item.product?.series),
           fitment: item.product?.fitment,
           bodyType: item.product?.bodyType,
         },
