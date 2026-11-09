@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   const buffer = Buffer.from(await file.arrayBuffer());
   let parsed;
   try {
-    parsed = parseSpreadsheet(buffer, file.name);
+    parsed = await parseSpreadsheet(buffer, file.name);
   } catch {
     return NextResponse.json({ error: "Could not parse the file. Check the format and try again." }, { status: 400 });
   }

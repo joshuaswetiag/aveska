@@ -14,10 +14,9 @@ database_name = "aveska"
 database_id = "d027caa8-f35a-4058-8ec7-ee1527a45dfa"
 migrations_dir = "migrations"
 
-# Enable R2 in the Cloudflare dashboard, then uncomment:
-# [[r2_buckets]]
-# binding = "UPLOADS"
-# bucket_name = "aveska-uploads"
+[[r2_buckets]]
+binding = "UPLOADS"
+bucket_name = "aveska-uploads"
 
 [triggers]
 crons = ["* * * * *"]

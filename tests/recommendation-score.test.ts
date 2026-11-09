@@ -38,6 +38,27 @@ describe("recommendation scoring", () => {
     expect(result.reasons.some((r) => r.code === "series_exact" || r.code === "series")).toBe(true);
   });
 
+  it("lets an explicit fitment match across a make mismatch", () => {
+    const result = scoreRecommendation({
+      customer: fordCustomer,
+      product: {
+        make: "Holden",
+        model: "Kingswood",
+        vehicleFamily: "Kingswood",
+        series: ["HQ"],
+        bodyType: null,
+        yearFrom: null,
+        yearTo: null,
+        application: "Panel",
+        sku: "CROSS-1",
+        stockStatus: "IN_STOCK",
+        explicitCompatibility: true,
+      },
+    });
+    expect(result.eligible).toBe(true);
+    expect(result.exclusionReason).toBeUndefined();
+  });
+
   it("does not recommend Toyota parts to a Ford customer", () => {
     const result = scoreRecommendation({
       customer: fordCustomer,

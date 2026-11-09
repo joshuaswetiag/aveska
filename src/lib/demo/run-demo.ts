@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { toCents } from "@/lib/money";
 import { extractVehicle } from "@/lib/vehicle/extract";
 import { upsertVehicleFromExtraction } from "@/lib/vehicle/persist";
 import { generateRecommendations } from "@/lib/recommendation/generate";
@@ -80,6 +81,7 @@ export async function runDemo(onProgress?: (done: number, total: number, message
     const extraction = extractVehicle(item);
     const data = {
       ...item,
+      price: toCents(item.price) ?? undefined,
       nameRaw: item.name,
       searchableText: `${item.name} ${item.make} ${item.series.join(" ")}`.toLowerCase(),
       vehicleFamily: item.vehicleFamily ?? extraction.vehicleFamily,
@@ -117,7 +119,7 @@ export async function runDemo(onProgress?: (done: number, total: number, message
         externalId: "DEMO-1001",
         customerId: customer.id,
         orderDate: new Date(),
-        orderTotal: 189,
+        orderTotal: toCents(189),
         items: {
           create: {
             productId: product.id,
@@ -125,7 +127,7 @@ export async function runDemo(onProgress?: (done: number, total: number, message
             productName: product.name,
             productNameRaw: product.name,
             quantity: 1,
-            unitPrice: 189,
+            unitPrice: toCents(189),
             category: product.category,
           },
         },

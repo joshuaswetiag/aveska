@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { fromCents } from "@/lib/money";
 import { asStringArray } from "@/lib/json-array";
 import { canonicalVehicleName, extractVehicle } from "@/lib/vehicle/extract";
 import { scoreRecommendation } from "@/lib/recommendation/score";
@@ -155,20 +156,6 @@ export function matchStockForVehicle(
     for (const fitment of product.fitments) {
       if (!fitment.isNegative) productMakes.add(fitment.vehicle.make.toLowerCase());
     }
-    if (productMakes.size && !productMakes.has(make)) continue;
-
-    const negative =
-      product.fitments.some(
-        (f) => f.isNegative && f.vehicle.make.toLowerCase() === make && (profile.series.length === 0 || asStringArray(f.vehicle.series).some((code) => profile.series.includes(code))),
-      ) ||
-      product.overrides.some((o) => {
-        if (o.isCompatible) return false;
-        const series = asStringArray(o.series);
-        if (!o.make && !series.length) return true;
-        if (o.make && o.make.toLowerCase() !== make) return false;
-        if (series.length && !series.some((code) => profile.series.includes(code))) return false;
-        return true;
-      });
     const positiveOverride = product.overrides.some((o) => {
       const series = asStringArray(o.series);
       return (
@@ -185,7 +172,20 @@ export function matchStockForVehicle(
         (profile.series.length === 0 || series.some((code) => profile.series.includes(code)))
       );
     });
+    if (productMakes.size && !productMakes.has(make) && !positiveOverride && !explicitFitment) continue;
 
+    const negative =
+      product.fitments.some(
+        (f) => f.isNegative && f.vehicle.make.toLowerCase() === make && (profile.series.length === 0 || asStringArray(f.vehicle.series).some((code) => profile.series.includes(code))),
+      ) ||
+      product.overrides.some((o) => {
+        if (o.isCompatible) return false;
+        const series = asStringArray(o.series);
+        if (!o.make && !series.length) return true;
+        if (o.make && o.make.toLowerCase() !== make) return false;
+        if (series.length && !series.some((code) => profile.series.includes(code))) return false;
+        return true;
+      });
     const scored = scoreRecommendation({
       customer: profile,
       product: {
@@ -221,7 +221,7 @@ export function matchStockForVehicle(
       sku: product.sku,
       url: product.url,
       imageUrl: product.imageUrl,
-      price: product.price != null ? Number(product.price) : null,
+      price: fromCents(product.price == null ? null : Number(product.price)),
       score: scored.score,
       matchLevel: scored.matchLevel,
     });

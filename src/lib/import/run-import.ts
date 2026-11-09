@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { prisma } from "@/lib/db";
+import { toCents } from "@/lib/money";
 import { applyMapping } from "@/lib/import/columns";
 import type { ColumnMapping, ParsedRow } from "@/types";
 import {
@@ -123,8 +124,8 @@ export async function importOrders(importJobId: string, rows: ParsedRow[], mappi
         productName: productNameRaw,
         productNameRaw,
         quantity: parseInteger(mapped.quantity) ?? 1,
-        unitPrice: parseNumber(mapped.unit_price) ?? undefined,
-        lineTotal: parseNumber(mapped.line_total) ?? parseNumber(mapped.unit_price) ?? undefined,
+        unitPrice: toCents(mapped.unit_price) ?? undefined,
+        lineTotal: toCents(mapped.line_total) ?? toCents(mapped.unit_price) ?? undefined,
         productUrl: str(mapped.product_url),
         category: str(mapped.category),
       };
@@ -139,7 +140,7 @@ export async function importOrders(importJobId: string, rows: ParsedRow[], mappi
             externalId,
             customerId: customer.id,
             orderDate,
-            orderTotal: parseNumber(mapped.order_total) ?? undefined,
+            orderTotal: toCents(mapped.order_total) ?? undefined,
             sourceRowHash: hash,
             importJobId,
             originalData: rows[i] as object,
@@ -218,7 +219,7 @@ export async function importCatalogue(importJobId: string, rows: ParsedRow[], ma
         continue;
       }
       const sku = str(mapped.sku);
-      const skuNormalized = sku ? normalizeKey(sku) : null;
+      const skuNormalized = sku ? normalizeKey(sku) || null : null;
       const existing = skuNormalized
         ? await prisma.product.findFirst({ where: { skuNormalized } })
         : await prisma.product.findFirst({ where: { nameRaw } });
@@ -273,7 +274,7 @@ export async function importCatalogue(importJobId: string, rows: ParsedRow[], ma
         category: str(mapped.category),
         subcategory: str(mapped.subcategory),
         brand: str(mapped.brand),
-        price: parseNumber(mapped.price) ?? parseNumber(mapped.unit_price),
+        price: toCents(mapped.price) ?? toCents(mapped.unit_price),
         stock: stockNum,
         stockStatus,
         make: str(mapped.make),

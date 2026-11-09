@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { isLiveOrderStatus } from "@/lib/catalogue/neto-orders";
 import { createManyIgnoreDuplicates } from "@/lib/create-many-safe";
 import { asStringArray } from "@/lib/json-array";
 import { scoreRecommendation } from "@/lib/recommendation/score";
@@ -127,6 +128,7 @@ export async function generateRecommendations(options?: {
         orders: {
           select: {
             orderDate: true,
+            originalData: true,
             items: { select: { sku: true, productId: true, productName: true, category: true } },
           },
         },
@@ -141,16 +143,19 @@ export async function generateRecommendations(options?: {
     }
 
     for (const customer of customers) {
-      const purchasedSkus = customer.orders.flatMap((order) =>
+      const liveOrders = customer.orders.filter((order) =>
+        isLiveOrderStatus((order.originalData as { OrderStatus?: string } | null)?.OrderStatus),
+      );
+      const purchasedSkus = liveOrders.flatMap((order) =>
         order.items.map((item) => ({
           sku: item.sku ?? item.productName,
           purchasedAt: order.orderDate,
         })),
       );
       const purchasedProductIds = new Set(
-        customer.orders.flatMap((o) => o.items.map((i) => i.productId).filter(Boolean) as string[]),
+        liveOrders.flatMap((o) => o.items.map((i) => i.productId).filter(Boolean) as string[]),
       );
-      const purchasedTypes = customer.orders.flatMap((o) => o.items.map((i) => i.category).filter(Boolean)) as string[];
+      const purchasedTypes = liveOrders.flatMap((o) => o.items.map((i) => i.category).filter(Boolean)) as string[];
 
       for (const customerVehicle of customer.vehicles) {
         const customerProfile = profileFromVehicle(customerVehicle.vehicle);

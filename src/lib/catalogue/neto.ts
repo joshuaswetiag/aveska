@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { toCents } from "@/lib/money";
 import { asStringArray } from "@/lib/json-array";
 import { extractVehicle } from "@/lib/vehicle/extract";
 import { looksLikeProductTitle } from "@/lib/vehicle/dictionary";
@@ -234,6 +235,7 @@ export async function syncNetoCatalogue(
       const name = normalizeWhitespace(item.Name ?? sku ?? "");
       if (!sku || !name) continue;
       const skuNormalized = normalizeKey(sku);
+      if (!skuNormalized) continue;
       const category = categoryName(item);
       const qty = stockQty(item);
       const url = productUrl(item);
@@ -289,7 +291,7 @@ export async function syncNetoCatalogue(
         bodyType: existing?.bodyType ?? extraction.bodyType,
         yearFrom: existing?.yearFrom ?? extraction.yearFrom,
         yearTo: existing?.yearTo ?? extraction.yearTo,
-        price: parseNumber(item.DefaultPrice) ?? parseNumber(item.PromotionPrice),
+        price: toCents(item.DefaultPrice) ?? toCents(item.PromotionPrice),
         stock: qty,
         stockStatus: stockStatus(item),
         searchableText,
@@ -371,6 +373,7 @@ export async function syncNetoProductUrls(onProgress?: (done: number, total: num
       const url = productPageUrl(item);
       if (!url) continue;
       const skuNormalized = normalizeKey(sku);
+      if (!skuNormalized) continue;
       const resultUpdate = await prisma.product.updateMany({
         where: { skuNormalized },
         data: { url },

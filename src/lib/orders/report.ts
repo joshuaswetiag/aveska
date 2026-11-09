@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { fromCents } from "@/lib/money";
 import { canonicalVehicleName } from "@/lib/vehicle/extract";
 import { formatDate, likeTerm, parseNumber, zonedDayRange } from "@/lib/utils";
 import type { VehicleExtraction } from "@/types";
@@ -165,9 +166,10 @@ export function orderShippingAmount(order: {
   const stored = parseNumber((order.originalData as { ShippingTotal?: string | number } | null)?.ShippingTotal);
   if (stored != null) return stored;
   if (order.orderTotal == null || !order.items?.length) return null;
-  const total = Number(order.orderTotal);
-  if (!Number.isFinite(total)) return null;
-  const product = order.items.reduce((sum, item) => sum + (parseNumber(item.lineTotal) ?? 0), 0);
+  const total = fromCents(Number(order.orderTotal));
+  if (total == null) return null;
+  const productCents = order.items.reduce((sum, item) => sum + (parseNumber(item.lineTotal) ?? 0), 0);
+  const product = fromCents(productCents) ?? 0;
   return Math.round((total - product) * 100) / 100;
 }
 
@@ -182,10 +184,10 @@ export function orderReportExportRow(item: OrderReportItem) {
     SKU: item.sku ?? "",
     Vehicle: vehicleLabelForOrderItem(item),
     Quantity: item.quantity,
-    "Unit price": item.unitPrice != null ? Number(item.unitPrice) : "",
-    "Line total": item.lineTotal != null ? Number(item.lineTotal) : "",
+    "Unit price": fromCents(item.unitPrice == null ? null : Number(item.unitPrice)) ?? "",
+    "Line total": fromCents(item.lineTotal == null ? null : Number(item.lineTotal)) ?? "",
     Shipping: orderShippingAmount(item.order) ?? "",
-    "Order total": item.order.orderTotal != null ? Number(item.order.orderTotal) : "",
+    "Order total": fromCents(item.order.orderTotal == null ? null : Number(item.order.orderTotal)) ?? "",
   };
 }
 
@@ -217,8 +219,8 @@ export async function fetchOrderReportPage(filters: OrderReportFilters) {
     totalLines,
     orderCount,
     quantity: aggregates._sum.quantity ?? 0,
-    revenue: Number(aggregates._sum.lineTotal ?? 0),
-    orderRevenue: Number(orderTotals._sum.orderTotal ?? 0),
+    revenue: fromCents(Number(aggregates._sum.lineTotal ?? 0)) ?? 0,
+    orderRevenue: fromCents(Number(orderTotals._sum.orderTotal ?? 0)) ?? 0,
   };
 }
 

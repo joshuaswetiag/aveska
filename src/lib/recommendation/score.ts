@@ -219,7 +219,8 @@ export function scoreRecommendation(input: MatchInput): RecommendationScore {
     reasons.push({ code: "same_family_purchased", label: "Already purchased similar product family", points: -8 });
   }
 
-  const hasCoreVehicleMatch = makeMatch && (overlap.length > 0 || familyMatch || product.explicitCompatibility);
+  const hasCoreVehicleMatch =
+    Boolean(product.explicitCompatibility) || (makeMatch && (overlap.length > 0 || familyMatch));
   if (!hasCoreVehicleMatch) {
     return {
       score: 0,
@@ -236,9 +237,9 @@ export function scoreRecommendation(input: MatchInput): RecommendationScore {
   }
 
   let matchLevel: RecommendationScore["matchLevel"] = "RELATED_APPLICATION";
-  if (makeMatch && overlap.length > 0 && (bodyMatch || familyMatch || product.explicitCompatibility)) {
+  if ((makeMatch || product.explicitCompatibility) && overlap.length > 0 && (bodyMatch || familyMatch || product.explicitCompatibility)) {
     matchLevel = "EXACT";
-  } else if (overlap.length > 0) {
+  } else if (overlap.length > 0 || product.explicitCompatibility) {
     matchLevel = "SAME_SERIES";
   } else if (familyMatch) {
     matchLevel = "SAME_FAMILY";
@@ -247,7 +248,9 @@ export function scoreRecommendation(input: MatchInput): RecommendationScore {
   const confidence =
     matchLevel === "EXACT" ? 0.96 : matchLevel === "SAME_SERIES" ? 0.9 : matchLevel === "SAME_FAMILY" ? 0.82 : 0.7;
 
-  const normalized = clamp(Math.round((raw / 155) * 100), 0, 100);
+  const normalized = product.explicitCompatibility
+    ? Math.max(clamp(Math.round((raw / 155) * 100), 0, 100), 70)
+    : clamp(Math.round((raw / 155) * 100), 0, 100);
   const eligible = confidence >= threshold && normalized >= 40;
 
   reasons.push({ code: "not_purchased", label: "Customer has not purchased this product", points: 0 });

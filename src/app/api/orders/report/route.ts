@@ -1,9 +1,8 @@
 import { NextResponse } from "@/server/next-response";
 import { auth } from "@/auth";
 import { audit } from "@/lib/audit";
-import { toCsv } from "@/lib/import/parse-file";
+import { toCsv, toXlsx } from "@/lib/import/parse-file";
 import { fetchOrderReportExport, parseOrderReportFilters } from "@/lib/orders/report";
-import * as XLSX from "xlsx";
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -27,10 +26,8 @@ export async function GET(request: Request) {
   });
 
   if (format === "xlsx") {
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Order report");
-    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
-    return new NextResponse(new Uint8Array(buffer), {
+    const buffer = await toXlsx([{ name: "Order report", rows }]);
+    return new NextResponse(new Blob([new Uint8Array(buffer)]), {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="aveska-order-report-${stamp}.xlsx"`,

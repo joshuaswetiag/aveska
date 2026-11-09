@@ -24,22 +24,28 @@ function secret() {
   return "dev-only-change-this-to-a-long-random-string";
 }
 
-function encode(user: SessionUser) {
+type TokenUser = SessionUser & { sid: string };
+
+function encode(user: TokenUser) {
   const body = Buffer.from(JSON.stringify({ ...user, exp: Date.now() + MAX_AGE * 1000 })).toString("base64url");
   const sig = createHmac("sha256", secret()).update(body).digest("base64url");
   return `${body}.${sig}`;
 }
 
-function decode(token: string): SessionUser | null {
+function decode(token: string): TokenUser | null {
   const [body, sig] = token.split(".");
   if (!body || !sig) return null;
   const expected = createHmac("sha256", secret()).update(body).digest("base64url");
   const left = Buffer.from(sig);
   const right = Buffer.from(expected);
   if (left.length !== right.length || !timingSafeEqual(left, right)) return null;
-  const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as SessionUser & { exp: number };
-  if (!payload.exp || payload.exp < Date.now()) return null;
-  return { id: payload.id, email: payload.email, name: payload.name, role: payload.role };
+  try {
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as TokenUser & { exp: number };
+    if (!payload.exp || payload.exp < Date.now() || !payload.sid || !payload.id) return null;
+    return { id: payload.id, email: payload.email, name: payload.name, role: payload.role, sid: payload.sid };
+  } catch {
+    return null;
+  }
 }
 
 function readCookie(header: string, name: string) {
@@ -59,9 +65,12 @@ export async function auth() {
   const request = requestContext.getStore();
   if (!request) return null;
   const token = readCookie(request.headers.get("cookie") ?? "", COOKIE);
-  const user = token ? decode(token) : null;
-  if (!user) return null;
-  return { user };
+  const payload = token ? decode(token) : null;
+  if (!payload) return null;
+  const session = await prisma.session.findUnique({ where: { id: payload.sid }, include: { user: true } });
+  if (!session || session.expiresAt.getTime() < Date.now() || session.userId !== payload.id) return null;
+  const user = session.user;
+  return { user: { id: user.id, email: user.email, name: user.name, role: user.role } };
 }
 
 export async function requireSession() {
@@ -96,12 +105,25 @@ export async function login(request: Request) {
     return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
   }
   loginAttempts.delete(email);
+  const created = await prisma.session.create({
+    data: { userId: user.id, expiresAt: new Date(Date.now() + MAX_AGE * 1000) },
+  });
   const response = NextResponse.json({ ok: true });
-  response.headers.append("set-cookie", cookie(encode({ id: user.id, email: user.email, name: user.name, role: user.role }), MAX_AGE));
+  response.headers.append(
+    "set-cookie",
+    cookie(encode({ id: user.id, email: user.email, name: user.name, role: user.role, sid: created.id }), MAX_AGE),
+  );
   return response;
 }
 
-export function logout() {
+export async function logout() {
+  const request = requestContext.getStore();
+  const token = request ? readCookie(request.headers.get("cookie") ?? "", COOKIE) : "";
+  const payload = token ? decode(token) : null;
+  if (payload?.sid) {
+    const row = await prisma.session.findUnique({ where: { id: payload.sid }, select: { userId: true } });
+    if (row) await prisma.session.deleteMany({ where: { userId: row.userId } });
+  }
   const response = NextResponse.json({ ok: true });
   response.headers.append("set-cookie", cookie("", 0));
   return response;

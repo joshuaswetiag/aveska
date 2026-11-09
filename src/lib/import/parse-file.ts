@@ -1,5 +1,5 @@
+import ExcelJS from "exceljs";
 import Papa from "papaparse";
-import * as XLSX from "xlsx";
 import type { ParsedRow } from "@/types";
 
 const MAX_PREVIEW = 50;
@@ -42,7 +42,19 @@ function rowsFromMatrix(matrix: unknown[][]): ParsedSpreadsheet {
   };
 }
 
-export function parseSpreadsheet(buffer: Buffer, fileName: string): ParsedSpreadsheet {
+function excelCell(value: unknown): unknown {
+  if (value == null) return null;
+  if (value instanceof Date) return value;
+  if (typeof value === "object") {
+    const cell = value as { result?: unknown; text?: string; richText?: Array<{ text: string }> };
+    if ("result" in cell && cell.result != null) return cell.result;
+    if (typeof cell.text === "string") return cell.text;
+    if (Array.isArray(cell.richText)) return cell.richText.map((part) => part.text).join("");
+  }
+  return value;
+}
+
+export async function parseSpreadsheet(buffer: Buffer, fileName: string): Promise<ParsedSpreadsheet> {
   const lower = fileName.toLowerCase();
   if (lower.endsWith(".json")) {
     const parsed = JSON.parse(buffer.toString("utf8"));
@@ -68,16 +80,33 @@ export function parseSpreadsheet(buffer: Buffer, fileName: string): ParsedSpread
     return rowsFromMatrix(result.data);
   }
 
-  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) return { headers: [], rows: [], preview: [], totalRows: 0 };
-  const sheet = workbook.Sheets[sheetName];
-  const matrix = XLSX.utils.sheet_to_json<(string | number | null)[]>(sheet, {
-    header: 1,
-    defval: null,
-    raw: true,
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return { headers: [], rows: [], preview: [], totalRows: 0 };
+  const matrix: unknown[][] = [];
+  sheet.eachRow({ includeEmpty: true }, (row) => {
+    const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+    matrix.push(values.map((cell) => excelCell(cell)));
   });
   return rowsFromMatrix(matrix);
+}
+
+function sheetSafe(value: unknown) {
+  if (typeof value === "string" && /^[=+\-@\t\r]/.test(value)) return `'${value}`;
+  return value ?? "";
+}
+
+export async function toXlsx(sheets: Array<{ name: string; rows: Record<string, unknown>[] }>): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  for (const spec of sheets) {
+    const sheet = workbook.addWorksheet(spec.name.slice(0, 31) || "Sheet");
+    const keys = [...new Set(spec.rows.flatMap((row) => Object.keys(row)))];
+    sheet.addRow(keys);
+    for (const row of spec.rows) sheet.addRow(keys.map((key) => sheetSafe(row[key])));
+  }
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer);
 }
 
 function csvSafe(value: unknown) {

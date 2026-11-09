@@ -5,6 +5,7 @@ import { formatCurrency, slugify, withUtm, zonedDayRange, STORE_TIMEZONE } from 
 import { loadStockProducts, matchStockForVehicle, vehicleCacheKey, vehicleFromOrderItem } from "@/lib/campaign/match-stock";
 import { resolveProductLink, isStoreHome } from "@/lib/catalogue/product-url";
 import { isEbayMemberEmail } from "@/lib/campaign/send-targets";
+import { isLiveOrderStatus } from "@/lib/catalogue/neto-orders";
 import type { CampaignType } from "@prisma/client";
 import type { FitmentProfile } from "@/types";
 
@@ -31,6 +32,25 @@ export type CampaignGenerateStats = {
   skippedSuppressed: number;
   skippedNoVehicle: number;
   skippedNoStock: number;
+  skippedFrequency?: number;
+}
+
+async function recentlyContacted(days: number, customerIds: string[]) {
+  const recent = new Set<string>();
+  if (days <= 0 || !customerIds.length) return recent;
+  const since = new Date(Date.now() - days * 86400000);
+  for (let index = 0; index < customerIds.length; index += 90) {
+    const rows = await prisma.campaignRecipient.findMany({
+      where: {
+        sent: true,
+        sentAt: { gte: since },
+        customerId: { in: customerIds.slice(index, index + 90) },
+      },
+      select: { customerId: true },
+    });
+    for (const row of rows) recent.add(row.customerId);
+  }
+  return recent;
 };
 
 export async function generateCampaign(
@@ -54,6 +74,19 @@ export async function generateCampaign(
 
 async function createCampaignRecord(input: CampaignGenerateInput, vehicleFilter?: string | null) {
   const settings = await prisma.settings.upsert({ where: { id: "default" }, update: {}, create: {} });
+  const filter = vehicleFilter ?? input.vehicleId ?? null;
+  const open = await prisma.campaign.findFirst({
+    where: {
+      name: input.name,
+      vehicleFilter: filter,
+      targetSegmentId: input.segmentId ?? null,
+      status: { in: ["DRAFT", "GENERATED", "IN_REVIEW"] },
+      sent: 0,
+      recipients: { none: { sent: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (open) return { campaign: open, settings, slug: open.slug };
   const slugBase = slugify(input.name) || `campaign-${Date.now()}`;
   const existing = await prisma.campaign.findUnique({ where: { slug: slugBase } });
   const slug = existing ? `${slugBase}-${Date.now().toString().slice(-4)}` : slugBase;
@@ -64,7 +97,7 @@ async function createCampaignRecord(input: CampaignGenerateInput, vehicleFilter?
       type: input.type ?? "CROSS_SELL",
       status: "GENERATED",
       targetSegmentId: input.segmentId,
-      vehicleFilter: vehicleFilter ?? input.vehicleId ?? null,
+      vehicleFilter: filter,
       fromName: settings.fromName,
       replyTo: settings.replyTo,
       trackingEnabled: settings.utmEnabled,
@@ -157,6 +190,7 @@ async function generateFromOrderRange(
   let skippedSuppressed = 0;
   let skippedNoVehicle = 0;
   let skippedNoStock = 0;
+  let skippedFrequency = 0;
   for (const customerId of uniqueCustomerIds) {
     if (byCustomer.has(customerId)) continue;
     const sample = items.find((item) => item.order.customerId === customerId);
@@ -171,7 +205,7 @@ async function generateFromOrderRange(
     sku: string | null;
     productId: string | null;
     category: string | null;
-    order: { customerId: string; orderDate: Date | null };
+    order: { customerId: string; orderDate: Date | null; originalData: unknown };
   }> = [];
   for (let index = 0; index < customerIds.length; index += 90) {
     const chunk = customerIds.slice(index, index + 90);
@@ -182,13 +216,15 @@ async function generateFromOrderRange(
           sku: true,
           productId: true,
           category: true,
-          order: { select: { customerId: true, orderDate: true } },
+          order: { select: { customerId: true, orderDate: true, originalData: true } },
         },
       })),
     );
   }
   const purchasedByCustomer = new Map<string, { ids: Set<string>; skus: Array<{ sku: string; purchasedAt?: Date | null }>; types: string[] }>();
   for (const row of purchases) {
+    const status = (row.order.originalData as { OrderStatus?: string } | null)?.OrderStatus;
+    if (!isLiveOrderStatus(status)) continue;
     const current = purchasedByCustomer.get(row.order.customerId) ?? { ids: new Set<string>(), skus: [], types: [] };
     if (row.productId) current.ids.add(row.productId);
     if (row.sku) current.skus.push({ sku: row.sku, purchasedAt: row.order.orderDate });
@@ -196,6 +232,15 @@ async function generateFromOrderRange(
     purchasedByCustomer.set(row.order.customerId, current);
   }
 
+  const recent = await recentlyContacted(settings.campaignFrequencyDays ?? 30, customerIds);
+  const already = new Set(
+    (
+      await prisma.campaignRecipient.findMany({
+        where: { campaignId: campaign.id },
+        select: { customerId: true },
+      })
+    ).map((row) => row.customerId),
+  );
   const stock = await loadStockProducts(settings.includeOutOfStock);
   const stockCache = new Map<string, ReturnType<typeof matchStockForVehicle>>();
   const cooldown = settings.cooldownDays === 0 ? ("never" as const) : settings.cooldownDays;
@@ -204,6 +249,11 @@ async function generateFromOrderRange(
   await onProgress?.(0, total, `Matching ${total.toLocaleString()} customers to in-stock parts`);
 
   for (const [customerId, group] of byCustomer) {
+    if (already.has(customerId) || recent.has(customerId)) {
+      if (recent.has(customerId)) skippedFrequency += 1;
+      done += 1;
+      continue;
+    }
     const purchased = purchasedByCustomer.get(customerId) ?? { ids: new Set<string>(), skus: [], types: [] };
     const cacheKey = vehicleCacheKey(group.vehicle.profile);
     let ranked = stockCache.get(cacheKey);
@@ -329,6 +379,7 @@ async function generateFromOrderRange(
       skippedSuppressed,
       skippedNoVehicle,
       skippedNoStock,
+      skippedFrequency,
     } satisfies CampaignGenerateStats,
   });
 }
@@ -363,6 +414,18 @@ async function generateFromRecommendations(
   const suppressedSet = new Set(suppressed.map((s) => s.emailNormalized));
 
   const byCustomer = new Map<string, typeof recommendations>();
+  const recent = await recentlyContacted(
+    settings.campaignFrequencyDays ?? 30,
+    [...new Set(recommendations.map((rec) => rec.customerId))],
+  );
+  const already = new Set(
+    (
+      await prisma.campaignRecipient.findMany({
+        where: { campaignId: campaign.id },
+        select: { customerId: true },
+      })
+    ).map((row) => row.customerId),
+  );
   for (const rec of recommendations) {
     const email = rec.customer.emailNormalized;
     if (!email || suppressedSet.has(email)) continue;
@@ -374,6 +437,7 @@ async function generateFromRecommendations(
   }
 
   for (const [customerId, recs] of byCustomer) {
+    if (already.has(customerId) || recent.has(customerId)) continue;
     const customer = recs[0].customer;
     if (isEbayMemberEmail(customer.emailNormalized)) continue;
     const vehicle = recs[0].vehicle;

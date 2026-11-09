@@ -116,6 +116,18 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   auditLogs    AuditLog[]
+  sessions     Session[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Customer {
@@ -123,13 +135,13 @@ model Customer {
   externalId         String?
   name               String
   email              String?
-  emailNormalized    String?
+  emailNormalized    String?              @unique
   phone              String?
   firstName          String?
   lastName           String?
   totalOrders        Int                  @default(0)
-  totalSpend         Decimal              @default(0)
-  averageOrderValue  Decimal              @default(0)
+  totalSpend         Int                  @default(0)
+  averageOrderValue  Int                  @default(0)
   firstPurchaseAt    DateTime?
   lastPurchaseAt     DateTime?
   productCount       Int                  @default(0)
@@ -156,11 +168,11 @@ model Customer {
 
 model Order {
   id            String      @id @default(cuid())
-  externalId    String?
+  externalId    String?     @unique
   customerId    String
   customer      Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
   orderDate     DateTime?
-  orderTotal    Decimal?   
+  orderTotal    Int?   
   sourceRowHash String?
   importJobId   String?
   originalData  Json?
@@ -185,8 +197,8 @@ model OrderItem {
   productName           String
   productNameRaw        String
   quantity              Int      @default(1)
-  unitPrice             Decimal?
-  lineTotal             Decimal?
+  unitPrice             Int?
+  lineTotal             Int?
   productUrl            String?
   category              String?
   extractedVehicle      Json?
@@ -202,7 +214,7 @@ model OrderItem {
 model Product {
   id             String            @id @default(cuid())
   sku            String?
-  skuNormalized  String?
+  skuNormalized  String?           @unique
   externalId     String?
   name           String
   nameRaw        String
@@ -213,7 +225,7 @@ model Product {
   category       String?
   subcategory    String?
   brand          String?
-  price          Decimal?         
+  price          Int?         
   stock          Int?
   stockStatus    StockStatus       @default(UNKNOWN)
   make           String?
@@ -445,7 +457,7 @@ model Campaign {
   bounced         Int                 @default(0)
   unsubscribed    Int                 @default(0)
   converted       Int                 @default(0)
-  revenue         Decimal             @default(0)
+  revenue         Int                 @default(0)
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
   recipients      CampaignRecipient[]
@@ -481,7 +493,7 @@ model CampaignRecipient {
   bounced          Boolean   @default(false)
   unsubscribed     Boolean   @default(false)
   converted        Boolean   @default(false)
-  revenue          Decimal   @default(0)
+  revenue          Int       @default(0)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   traffic          CampaignTraffic[]
@@ -660,6 +672,7 @@ model Settings {
   aiProvider              String?
   aiModel                 String?
   reduceScoreSameFamily   Boolean  @default(true)
+  campaignFrequencyDays   Int      @default(30)
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 }

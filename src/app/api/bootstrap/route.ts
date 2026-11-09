@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db";
 import { processNextJob } from "@/lib/jobs/queue";
 import { startJobWorker } from "@/lib/jobs/worker";
 import { FULL_SYNC_FROM, ensureFullSyncQueued, listFullSyncJobs } from "@/lib/catalogue/full-sync";
+import { fromCents } from "@/lib/money";
+import { internalError } from "@/server/http-error";
 import { storeIsoDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -42,7 +44,7 @@ async function counts() {
     products,
     vehicles,
     recommendations,
-    revenue: Number(revenue._sum.orderTotal ?? 0),
+    revenue: fromCents(Number(revenue._sum.orderTotal ?? 0)) ?? 0,
   };
 }
 
@@ -75,8 +77,7 @@ export async function GET() {
       try {
         job = await ensureFullSyncQueued(session.user.id);
       } catch (error) {
-        enqueueError = error instanceof Error ? error.message : "Could not queue full sync";
-        console.error("Could not queue full sync", error);
+        enqueueError = internalError("Could not queue full sync", error);
       }
     }
     const fullJobs = await listFullSyncJobs().catch(() => []);
@@ -100,8 +101,7 @@ export async function GET() {
       to: storeIsoDate(),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Bootstrap check failed";
-    console.error("GET /api/bootstrap", error);
+    const message = internalError("GET /api/bootstrap", error);
     return json(
       {
         error: message,
@@ -132,8 +132,7 @@ export async function POST(request: Request) {
     const job = await ensureFullSyncQueued(session.user.id, Boolean(body.force));
     return json({ jobId: job?.id ?? null, started: Boolean(job), job: serializeJob(job), counts: stats });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not start sync";
-    console.error("POST /api/bootstrap", error);
+    const message = internalError("POST /api/bootstrap", error);
     return json({ error: message, jobId: null, started: false, counts: stats }, 500);
   }
 }

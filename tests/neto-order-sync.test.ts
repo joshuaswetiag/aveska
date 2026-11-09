@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { netoOrderDateFilters, parseOrderSyncRange } from "@/lib/catalogue/neto-orders";
+import { isLiveOrderStatus, netoOrderDateFilters, parseOrderSyncRange } from "@/lib/catalogue/neto-orders";
 import { orderShippingAmount } from "@/lib/orders/report";
 
 describe("order sync date range", () => {
@@ -17,6 +17,13 @@ describe("order sync date range", () => {
       to: "2026-08-17",
     });
     expect(parseOrderSyncRange({})).toBeNull();
+  });
+
+  it("does not treat quotes or cancelled orders as purchases", () => {
+    expect(isLiveOrderStatus("Dispatched")).toBe(true);
+    expect(isLiveOrderStatus("Quote")).toBe(false);
+    expect(isLiveOrderStatus("Cancelled")).toBe(false);
+    expect(isLiveOrderStatus(undefined)).toBe(true);
   });
 
   it("filters Neto by the UTC window for Sydney calendar days", () => {
@@ -47,8 +54,8 @@ describe("order shipping vs grand total", () => {
     expect(
       orderShippingAmount({
         originalData: {},
-        orderTotal: "50.2",
-        items: [{ lineTotal: "39.6" }],
+        orderTotal: 5020,
+        items: [{ lineTotal: 3960 }],
       }),
     ).toBe(10.6);
   });

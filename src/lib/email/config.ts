@@ -1,3 +1,4 @@
+import { openSecret } from "@/lib/email/secret-box";
 import { normalizeEmail } from "@/lib/utils";
 
 export type MailProviderName = "export" | "smtp" | "maropost" | "resend";
@@ -88,16 +89,16 @@ export function getMailProviderName(stored?: StoredMailSettings | null): MailPro
 export function getMailPassword(stored?: StoredMailSettings | null) {
   const provider = getMailProviderName(stored);
   if (provider === "resend") {
-    const storedKey = stored?.smtpPassword?.trim() || "";
+    const storedKey = openSecret(stored?.smtpPassword) || "";
     const envKey = env("RESEND_API_KEY") || "";
     if (storedKey.startsWith("re_")) return storedKey;
     if (envKey) return envKey;
     return storedKey;
   }
   if (provider === "maropost") {
-    return stored?.maropostApiKey?.trim() || stored?.smtpPassword?.trim() || env("MAROPOST_API_KEY") || env("SMTP_PASSWORD") || "";
+    return openSecret(stored?.maropostApiKey) || openSecret(stored?.smtpPassword) || env("MAROPOST_API_KEY") || env("SMTP_PASSWORD") || "";
   }
-  return stored?.smtpPassword?.trim() || env("SMTP_PASSWORD") || "";
+  return openSecret(stored?.smtpPassword) || env("SMTP_PASSWORD") || "";
 }
 
 export function getMailConfig(

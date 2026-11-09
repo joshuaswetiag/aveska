@@ -12,6 +12,7 @@ import {
   parseOrderReportFilters,
   vehicleLabelForOrderItem,
 } from "@/lib/orders/report";
+import { fromCents, prepareClient } from "@/lib/money";
 import { formatCurrency, likeTerm, zonedDayRange } from "@/lib/utils";
 import { NextResponse } from "@/server/next-response";
 
@@ -70,7 +71,7 @@ async function dashboard() {
     stats: [
       { label: "Customers", value: customers },
       { label: "Orders", value: orders },
-      { label: "Revenue", value: formatCurrency(Number(revenue._sum.orderTotal ?? 0)) },
+      { label: "Revenue", value: formatCurrency(fromCents(Number(revenue._sum.orderTotal ?? 0))) },
       { label: "Unique vehicles", value: vehicles },
       { label: "Catalogue products", value: products },
       { label: "Eligible for cross-sell", value: eligible },
@@ -93,7 +94,7 @@ async function customers(url: URL) {
     orderBy: { lastPurchaseAt: "desc" },
     take: 100,
   });
-  return { q, customers: rows };
+  return prepareClient({ q, customers: rows });
 }
 
 async function customer(id: string) {
@@ -107,7 +108,7 @@ async function customer(id: string) {
       campaignRecipients: { include: { campaign: true } },
     },
   });
-  return row;
+  return row ? prepareClient(row) : row;
 }
 
 async function products(url: URL) {
@@ -138,7 +139,7 @@ async function products(url: URL) {
       take: pageSize,
     }),
   ]);
-  return { q, page, pageSize, total, products: rows };
+  return prepareClient({ q, page, pageSize, total, products: rows });
 }
 
 async function product(id: string) {
@@ -154,11 +155,11 @@ async function product(id: string) {
   if (!row) return null;
   const customers = new Map<string, string>();
   for (const item of row.orderItems) customers.set(item.order.customerId, item.order.customer.name);
-  return {
+  return prepareClient({
     product: row,
     customers: [...customers.entries()].map(([id, name]) => ({ id, name })),
     eligible: row.recommendations.filter((rec) => rec.status === "GENERATED" || rec.status === "APPROVED").length,
-  };
+  });
 }
 
 async function vehicles() {
@@ -192,7 +193,7 @@ async function vehicle(id: string) {
       })),
     );
   }
-  const revenue = orders.reduce((sum, order) => sum + Number(order.orderTotal ?? 0), 0);
+  const revenue = fromCents(orders.reduce((sum, order) => sum + Number(order.orderTotal ?? 0), 0)) ?? 0;
   const purchased = new Map<string, { name: string; url: string | null; count: number }>();
   const purchasedIds = new Set<string>();
   for (const order of orders) {
@@ -234,7 +235,7 @@ async function recommendations(url: URL) {
     orderBy: { score: "desc" },
     take: 200,
   });
-  return { status, recs };
+  return prepareClient({ status, recs });
 }
 
 async function campaigns() {
@@ -273,7 +274,7 @@ async function campaign(id: string) {
           },
         })
       : null;
-  return { campaign: row, traffic, dateRange, ordersInRange };
+  return prepareClient({ campaign: row, traffic, dateRange, ordersInRange });
 }
 
 async function orders(url: URL) {
@@ -304,10 +305,10 @@ async function orders(url: URL) {
       sku: item.sku,
       vehicle: vehicleLabelForOrderItem(item) || "—",
       quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      lineTotal: item.lineTotal,
+      unitPrice: fromCents(item.unitPrice == null ? null : Number(item.unitPrice)),
+      lineTotal: fromCents(item.lineTotal == null ? null : Number(item.lineTotal)),
       shipping: orderShippingAmount(item.order),
-      orderTotal: item.order.orderTotal,
+      orderTotal: fromCents(item.order.orderTotal == null ? null : Number(item.order.orderTotal)),
     })),
   };
 }

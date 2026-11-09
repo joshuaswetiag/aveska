@@ -1,3 +1,4 @@
+import { internalError } from "@/server/http-error";
 import { NextResponse } from "@/server/next-response";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
@@ -21,10 +22,8 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   try {
     await processNextJob(id);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Job failed";
-    console.error("POST /api/jobs/process", id, error);
     const latest = await prisma.job.findUnique({ where: { id } });
-    return NextResponse.json({ error: message, job: latest }, { status: 500 });
+    return NextResponse.json({ error: internalError("POST /api/jobs/process", error), job: latest }, { status: 500 });
   }
   return NextResponse.json(await prisma.job.findUnique({ where: { id } }));
 }

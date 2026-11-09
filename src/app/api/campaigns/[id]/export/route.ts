@@ -1,8 +1,7 @@
 import { NextResponse } from "@/server/next-response";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
-import { toCsv } from "@/lib/import/parse-file";
-import * as XLSX from "xlsx";
+import { toCsv, toXlsx } from "@/lib/import/parse-file";
 import { audit } from "@/lib/audit";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -22,7 +21,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const rows = campaign.recipients.map((recipient) => {
     const personalized = recipient.personalized as { products?: Array<{ name?: string; url?: string }> } | null;
     const own = personalized?.products?.[0];
-    const recProduct = own ? { name: own.name, url: own.url } : campaign.products.find((row) => row.recommendation?.customerId === recipient.customerId)?.product ?? campaign.products[0]?.product;
+    const linked = campaign.products.find((row) => row.recommendation?.customerId === recipient.customerId);
+    const recProduct = own ?? (linked?.product ? { name: linked.product.name, url: linked.product.url } : null);
     return {
       "Customer Name": recipient.customer.name,
       Email: recipient.customer.email ?? "",
@@ -34,7 +34,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       Preheader: recipient.preheader ?? "",
       "Email Body": recipient.bodyHtml ?? "",
       "Campaign Name": campaign.name,
-      "Recommendation Score": campaign.products[0]?.recommendation ? Number(campaign.products[0].recommendation.score) : "",
+      "Recommendation Score": linked?.recommendation ? Number(linked.recommendation.score) : "",
     };
   });
   const list = campaign.recipients
@@ -46,11 +46,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const format = new URL(request.url).searchParams.get("format") ?? "csv";
   if (format === "xlsx") {
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Campaign");
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(list), "Email list");
-    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
-    return new NextResponse(new Uint8Array(buffer), {
+    const buffer = await toXlsx([
+      { name: "Campaign", rows },
+      { name: "Email list", rows: list },
+    ]);
+    return new NextResponse(new Blob([new Uint8Array(buffer)]), {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="${campaign.slug}.xlsx"`,

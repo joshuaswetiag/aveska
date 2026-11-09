@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { isLiveOrderStatus } from "@/lib/catalogue/neto-orders";
 import { createManyIgnoreDuplicates } from "@/lib/create-many-safe";
 import { asStringArray, toJsonArray } from "@/lib/json-array";
 import type { LearnedVehicleKnowledge, VehicleExtraction } from "@/types";
@@ -668,20 +669,23 @@ export async function refreshCustomerStats() {
     },
   });
   for (const customer of customers) {
-    const totals = customer.orders.reduce((sum, order) => sum + Number(order.orderTotal ?? 0), 0);
-    const dates = customer.orders.map((o) => o.orderDate).filter(Boolean) as Date[];
-    const productCount = customer.orders.reduce((sum, o) => sum + o.items.length, 0);
+    const liveOrders = customer.orders.filter((order) =>
+      isLiveOrderStatus((order.originalData as { OrderStatus?: string } | null)?.OrderStatus),
+    );
+    const totals = liveOrders.reduce((sum, order) => sum + Number(order.orderTotal ?? 0), 0);
+    const dates = liveOrders.map((o) => o.orderDate).filter(Boolean) as Date[];
+    const productCount = liveOrders.reduce((sum, o) => sum + o.items.length, 0);
     const primary = customer.vehicles.sort((a, b) => Number(b.confidence) - Number(a.confidence))[0];
-    const categories = customer.orders.flatMap((o) => o.items.map((i) => i.category).filter(Boolean)) as string[];
+    const categories = liveOrders.flatMap((o) => o.items.map((i) => i.category).filter(Boolean)) as string[];
     const mainCategory = categories.sort(
       (a, b) => categories.filter((c) => c === b).length - categories.filter((c) => c === a).length,
     )[0];
     await prisma.customer.update({
       where: { id: customer.id },
       data: {
-        totalOrders: customer.orders.length,
-        totalSpend: totals,
-        averageOrderValue: customer.orders.length ? totals / customer.orders.length : 0,
+        totalOrders: liveOrders.length,
+        totalSpend: Math.round(totals),
+        averageOrderValue: liveOrders.length ? Math.round(totals / liveOrders.length) : 0,
         firstPurchaseAt: dates.sort((a, b) => a.getTime() - b.getTime())[0] ?? null,
         lastPurchaseAt: dates.sort((a, b) => b.getTime() - a.getTime())[0] ?? null,
         productCount,

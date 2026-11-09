@@ -100,7 +100,7 @@ export async function processNextJob(jobId?: string) {
       if (!importJob.filePath || !importJob.columnMapping) throw new Error("Import is missing file or column mapping");
       const buffer = await readUpload(importJob.filePath);
       const uploadPath = importJob.filePath;
-      const parsed = parseSpreadsheet(buffer, importJob.fileName);
+      const parsed = await parseSpreadsheet(buffer, importJob.fileName);
       await progress(0, parsed.rows.length, "Importing rows");
       const mapping = importJob.columnMapping as ColumnMapping;
       if (importJob.type === "ORDERS") result = await importOrders(importJob.id, parsed.rows, mapping);

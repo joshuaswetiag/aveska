@@ -1,3 +1,4 @@
+import { internalError } from "@/server/http-error";
 import { NextResponse } from "@/server/next-response";
 import { auth } from "@/auth";
 import { verifyMailTransport } from "@/lib/email/smtp";
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
     const result = await verifyMailTransport(draft);
     return NextResponse.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not connect";
-    return NextResponse.json({ error: message }, { status: 400 });
+    internalError("POST /api/settings/mail/test", error);
+    return NextResponse.json({ error: "Could not connect" }, { status: 400 });
   }
 }

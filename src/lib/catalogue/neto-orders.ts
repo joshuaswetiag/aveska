@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { toCents } from "@/lib/money";
 import { asItems, netoRequest } from "@/lib/catalogue/neto";
 import { asStringArray } from "@/lib/json-array";
 import { extractVehicle } from "@/lib/vehicle/extract";
@@ -82,6 +83,12 @@ const LIVE_STATUSES = [
   "Dispatched",
   "On Hold",
 ];
+
+export function isLiveOrderStatus(status: string | null | undefined) {
+  const value = status?.trim();
+  if (!value) return true;
+  return LIVE_STATUSES.some((item) => item.toLowerCase() === value.toLowerCase());
+}
 
 export type NetoOrderSyncOptions = {
   from?: string | null;
@@ -167,10 +174,10 @@ export async function syncNetoOrders(
   const deadline = options?.timeBudgetMs ? Date.now() + options.timeBudgetMs : Number.POSITIVE_INFINITY;
   const maxPages = options?.maxPages ?? Number.POSITIVE_INFINITY;
   // Date-placed pass covers the history window; skip the slower "updated" pass unless opted in.
-  const includeUpdated = process.env.NETO_ORDERS_INCLUDE_UPDATED === "1";
+  const includeUpdated = process.env.NETO_ORDERS_INCLUDE_UPDATED !== "0";
   const passes: Array<{ filter: NetoOrderApiFilter; label: string }> = dateFilters && range
     ? [
-        { filter: dateFilters.placed, label: `placed ${range.from} to ${range.to}` },
+        { filter: { ...dateFilters.placed, OrderStatus: LIVE_STATUSES }, label: `placed ${range.from} to ${range.to}` },
         ...(includeUpdated
           ? [{ filter: dateFilters.updated, label: `updated ${range.from} to ${range.to}` }]
           : []),
@@ -303,13 +310,21 @@ export async function syncNetoOrders(
         });
       }
 
-      const orderLines = asItems(netoOrder.OrderLine).filter((line) => !isNonProductLine(line.SKU, line.ProductName));
       const existingId = orderByExternalId.get(orderId);
+      if (!isLiveOrderStatus(netoOrder.OrderStatus)) {
+        if (existingId) {
+          await prisma.order.delete({ where: { id: existingId } });
+          orderByExternalId.delete(orderId);
+          updated += 1;
+        }
+        continue;
+      }
+      const orderLines = asItems(netoOrder.OrderLine).filter((line) => !isNonProductLine(line.SKU, line.ProductName));
       const orderData = {
         externalId: orderId,
         customerId: customer.id,
         orderDate: parseNetoDate(netoOrder.DatePlaced) ?? parseNetoDate(netoOrder.DatePaid),
-        orderTotal: parseNumber(netoOrder.GrandTotal) ?? undefined,
+        orderTotal: toCents(netoOrder.GrandTotal) ?? undefined,
         sourceRowHash: `neto:${orderId}`,
         originalData: {
           OrderID: orderId,
@@ -329,7 +344,7 @@ export async function syncNetoOrders(
         const productName = normalizeWhitespace(line.ProductName ?? sku ?? "Unknown product");
         const product = sku ? productBySku.get(normalizeKey(sku)) : undefined;
         const quantity = parseInteger(line.Quantity) ?? 1;
-        const unitPrice = parseNumber(line.UnitPrice);
+        const unitPrice = toCents(line.UnitPrice);
         const extraction = extractVehicle({
           name: productName,
           sku,

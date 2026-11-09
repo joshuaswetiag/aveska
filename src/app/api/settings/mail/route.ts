@@ -1,3 +1,4 @@
+import { internalError } from "@/server/http-error";
 import { NextResponse } from "@/server/next-response";
 import { auth } from "@/auth";
 import { audit } from "@/lib/audit";
@@ -72,7 +73,6 @@ export async function POST(request: Request) {
       maropostApiKeySet: Boolean(maropostApiKey),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not save SMTP settings";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: internalError("POST /api/settings/mail", error) }, { status: 500 });
   }
 }
