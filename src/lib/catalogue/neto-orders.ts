@@ -4,6 +4,8 @@ import { asItems, netoRequest } from "@/lib/catalogue/neto";
 import { asStringArray } from "@/lib/json-array";
 import { extractVehicle } from "@/lib/vehicle/extract";
 import { backfillCustomerVehiclesFromOrders } from "@/lib/vehicle/persist";
+import { isUniqueConflict } from "@/lib/create-many-safe";
+import { readEnv } from "@/lib/read-env";
 import {
   firstNameFrom,
   normalizeEmail,
@@ -168,13 +170,13 @@ export async function syncNetoOrders(
   onProgress?: (done: number, total: number, message?: string) => Promise<void>,
   options?: NetoOrderSyncOptions,
 ) {
-  const pageSize = Number(process.env.NETO_ORDER_PAGE_SIZE ?? 100) || 100;
+  const pageSize = Number(readEnv("NETO_ORDER_PAGE_SIZE") ?? 100) || 100;
   const range = parseOrderSyncRange(options ?? {});
   const dateFilters = range ? netoOrderDateFilters(range) : null;
   const deadline = options?.timeBudgetMs ? Date.now() + options.timeBudgetMs : Number.POSITIVE_INFINITY;
   const maxPages = options?.maxPages ?? Number.POSITIVE_INFINITY;
   // Date-placed pass covers the history window; skip the slower "updated" pass unless opted in.
-  const includeUpdated = process.env.NETO_ORDERS_INCLUDE_UPDATED !== "0";
+  const includeUpdated = readEnv("NETO_ORDERS_INCLUDE_UPDATED") !== "0";
   const passes: Array<{ filter: NetoOrderApiFilter; label: string }> = dateFilters && range
     ? [
         { filter: { ...dateFilters.placed, OrderStatus: LIVE_STATUSES }, label: `placed ${range.from} to ${range.to}` },
@@ -283,18 +285,28 @@ export async function syncNetoOrders(
       const name = customerName(netoOrder);
       let customer = email ? customerByEmail.get(email) : username ? customerByUsername.get(username) : undefined;
       if (!customer) {
-        const createdCustomer = await prisma.customer.create({
-          data: {
-            externalId: netoOrder.Username ?? orderId,
-            name,
-            email: netoOrder.Email?.trim() || null,
-            emailNormalized: email,
-            phone: netoOrder.ShipPhone ?? netoOrder.BillPhone ?? null,
-            firstName: firstNameFrom(name),
-            lastName: name.split(" ").slice(1).join(" ") || null,
-            originalData: { username: netoOrder.Username, orderId } as object,
-          },
-        });
+        const data = {
+          externalId: netoOrder.Username ?? orderId,
+          name,
+          email: netoOrder.Email?.trim() || null,
+          emailNormalized: email,
+          phone: netoOrder.ShipPhone ?? netoOrder.BillPhone ?? null,
+          firstName: firstNameFrom(name),
+          lastName: name.split(" ").slice(1).join(" ") || null,
+          originalData: { username: netoOrder.Username, orderId } as object,
+        };
+        let createdCustomer: { id: string; externalId: string | null };
+        try {
+          createdCustomer = await prisma.customer.create({ data });
+        } catch (error) {
+          if (!isUniqueConflict(error) || !email) throw error;
+          const existing = await prisma.customer.findFirst({
+            where: { emailNormalized: email },
+            select: { id: true, externalId: true },
+          });
+          if (!existing) throw error;
+          createdCustomer = existing;
+        }
         customer = { id: createdCustomer.id, emailNormalized: email, name, externalId: createdCustomer.externalId };
         if (email) customerByEmail.set(email, customer);
         if (username) customerByUsername.set(username, customer);

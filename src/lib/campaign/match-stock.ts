@@ -4,7 +4,6 @@ import { asStringArray } from "@/lib/json-array";
 import { canonicalVehicleName, extractVehicle } from "@/lib/vehicle/extract";
 import { scoreRecommendation } from "@/lib/recommendation/score";
 import type { FitmentProfile, VehicleExtraction } from "@/types";
-import type { StockStatus } from "@prisma/client";
 
 export type StockMatch = {
   productId: string;
@@ -15,33 +14,6 @@ export type StockMatch = {
   price: number | null;
   score: number;
   matchLevel: string;
-};
-
-type StockProduct = {
-  id: string;
-  name: string;
-  sku: string | null;
-  url: string | null;
-  imageUrl: string | null;
-  price: unknown;
-  make: string | null;
-  model: string | null;
-  vehicleFamily: string | null;
-  series: string[];
-  bodyType: string | null;
-  yearFrom: number | null;
-  yearTo: number | null;
-  fitment: string | null;
-  category: string | null;
-  tags: string[];
-  discontinued: boolean;
-  stockStatus: StockStatus;
-  fitments: Array<{
-    isNegative: boolean;
-    vehicleId: string;
-    vehicle: { id: string; make: string; series: string[] };
-  }>;
-  overrides: Array<{ isCompatible: boolean; make: string | null; series: string[] }>;
 };
 
 function profileFromExtraction(extraction: VehicleExtraction): FitmentProfile {

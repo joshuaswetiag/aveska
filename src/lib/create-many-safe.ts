@@ -1,4 +1,4 @@
-function isUniqueConflict(error: unknown) {
+export function isUniqueConflict(error: unknown) {
   const code = (error as { code?: string } | null)?.code;
   if (code === "P2002") return true;
   const message = error instanceof Error ? error.message : String(error ?? "");

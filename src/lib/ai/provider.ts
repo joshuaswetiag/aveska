@@ -2,6 +2,7 @@ import type { EmailCopy, TemplateVariables } from "@/types";
 import { professionalEmailCopy } from "@/lib/email/copy";
 import { applyTemplate, renderEmailHtml } from "@/lib/email/provider";
 import { firstNameFrom } from "@/lib/utils";
+import { readEnv } from "@/lib/read-env";
 
 export interface AiProvider {
   name: string;
@@ -44,9 +45,9 @@ export class OpenAiCompatibleProvider implements AiProvider {
     products: Array<{ name: string }>;
     campaignType: string;
   }): Promise<Omit<EmailCopy, "html">> {
-    const apiKey = process.env.AI_API_KEY;
-    const model = process.env.AI_MODEL || "gpt-4o-mini";
-    const baseUrl = process.env.AI_BASE_URL || "https://api.openai.com/v1";
+    const apiKey = readEnv("AI_API_KEY");
+    const model = readEnv("AI_MODEL") || "gpt-4o-mini";
+    const baseUrl = readEnv("AI_BASE_URL") || "https://api.openai.com/v1";
     if (!apiKey) return new TemplateAiProvider().generateEmailCopy(input);
 
     const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -90,7 +91,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
 }
 
 export function getAiProvider(): AiProvider {
-  const provider = (process.env.AI_PROVIDER || "none").toLowerCase();
+  const provider = (readEnv("AI_PROVIDER") || "none").toLowerCase();
   if (provider === "openai" || provider === "openai-compatible") return new OpenAiCompatibleProvider();
   return new TemplateAiProvider();
 }

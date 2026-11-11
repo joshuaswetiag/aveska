@@ -10,4 +10,16 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("recharts") || id.includes("d3-")) return "charts";
+          if (id.includes("react-dom") || id.includes("react-router") || id.includes("/react/")) return "react";
+          if (id.includes("@radix-ui") || id.includes("lucide-react")) return "ui";
+        },
+      },
+    },
+  },
 });

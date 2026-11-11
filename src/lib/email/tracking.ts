@@ -1,4 +1,5 @@
 import { unsubscribeUrl } from "@/lib/campaign/unsubscribe-token";
+import { readEnv } from "@/lib/read-env";
 
 function normalizeOrigin(url: string | null | undefined) {
   return url?.trim().replace(/\/$/, "") || "";
@@ -7,18 +8,18 @@ function normalizeOrigin(url: string | null | undefined) {
 export function publicAppUrl() {
   return (
     pickTrackingBaseUrl({
-      trackingUrl: process.env.TRACKING_URL,
-      railwayPublicDomain: process.env.RAILWAY_PUBLIC_DOMAIN,
-      railwayStaticUrl: process.env.RAILWAY_STATIC_URL,
-      authUrl: process.env.AUTH_URL,
-      nextAuthUrl: process.env.NEXTAUTH_URL,
-      production: process.env.NODE_ENV === "production",
+      trackingUrl: readEnv("TRACKING_URL"),
+      railwayPublicDomain: readEnv("RAILWAY_PUBLIC_DOMAIN"),
+      railwayStaticUrl: readEnv("RAILWAY_STATIC_URL"),
+      authUrl: readEnv("AUTH_URL"),
+      nextAuthUrl: readEnv("NEXTAUTH_URL"),
+      production: readEnv("NODE_ENV") === "production" || readEnv("AVESKA_RUNTIME") === "worker",
     }) || "http://localhost:3000"
   );
 }
 
 export function railwayPublicOrigin() {
-  return originFromRailwayDomain(process.env.RAILWAY_PUBLIC_DOMAIN || process.env.RAILWAY_STATIC_URL);
+  return originFromRailwayDomain(readEnv("RAILWAY_PUBLIC_DOMAIN") || readEnv("RAILWAY_STATIC_URL"));
 }
 
 export function originFromRailwayDomain(domain?: string | null) {

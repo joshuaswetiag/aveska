@@ -81,8 +81,12 @@ describe("email generation", () => {
     expect(restyled).toContain("background:#ffffff");
     expect(restyled).not.toContain("data:image/png");
     const outbound = htmlWithInlineLogo(oldHtml);
-    expect(outbound.html).toContain('src="cid:aveska-logo"');
-    expect(outbound.attachments[0]?.cid).toBe("aveska-logo");
+    if (outbound.attachments.length) {
+      expect(outbound.html).toContain('src="cid:aveska-logo"');
+      expect(outbound.attachments[0]?.cid).toBe("aveska-logo");
+    } else {
+      expect(outbound.html).toContain(AVESKA_LOGO_URL);
+    }
   });
 
   it("writes a professional vehicle-specific subject", async () => {

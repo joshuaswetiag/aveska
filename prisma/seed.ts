@@ -1,4 +1,4 @@
-import { hash } from "bcryptjs";
+import { hashPassword } from "../src/lib/password";
 import { PrismaClient } from "@prisma/client";
 import { toCents } from "../src/lib/money";
 import { extractVehicle } from "../src/lib/vehicle/extract";
@@ -9,7 +9,7 @@ const prisma = new PrismaClient();
 async function main() {
   const email = process.env.ADMIN_EMAIL || "admin@aveska.local";
   const password = process.env.ADMIN_PASSWORD || "change-me";
-  const passwordHash = await hash(password, 12);
+  const passwordHash = hashPassword(password);
 
   await prisma.user.upsert({
     where: { email },
@@ -22,7 +22,7 @@ async function main() {
     update: {},
     create: {
       email: "marketing@aveska.local",
-      passwordHash: await hash("change-me", 12),
+      passwordHash: hashPassword("change-me"),
       role: "MARKETING",
       name: "Marketing",
     },

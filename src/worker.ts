@@ -85,7 +85,11 @@ async function handleFetch(request: Request, env: Env, ctx: WorkerExecutionConte
       return await handleApi(request);
     } catch (error) {
       console.error("API error", error);
-      return Response.json({ error: "Internal error" }, { status: 500 });
+      const message = error instanceof Error ? error.message : "";
+      const errorText = message.includes("row write limit")
+        ? "Cloudflare D1 free daily write limit is used up. Login and sending will work again after midnight UTC."
+        : "Internal error";
+      return Response.json({ error: errorText }, { status: 500 });
     }
   }
 
@@ -94,7 +98,7 @@ async function handleFetch(request: Request, env: Env, ctx: WorkerExecutionConte
   return env.ASSETS.fetch(new URL("/index.html", request.url));
 }
 
-export default {
+const worker = {
   async fetch(request: Request, env: Env, ctx: WorkerExecutionContext) {
     return handleFetch(request, env, ctx);
   },
@@ -116,3 +120,5 @@ export default {
     );
   },
 };
+
+export default worker;

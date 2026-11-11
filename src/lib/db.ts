@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaD1 } from "@prisma/adapter-d1";
 import type { D1Database, R2Bucket } from "@/types/cloudflare-bindings";
+import { readEnv } from "@/lib/read-env";
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
@@ -27,7 +28,7 @@ function createClient() {
     });
   }
   return new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+    log: readEnv("NODE_ENV") === "development" ? ["error", "warn"] : ["error"],
   });
 }
 

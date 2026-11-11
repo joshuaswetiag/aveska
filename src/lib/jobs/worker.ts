@@ -1,6 +1,7 @@
 import { processNextJob } from "@/lib/jobs/queue";
 import { prisma } from "@/lib/db";
 import { ensureRailwayTrackingUrl } from "@/lib/email/tracking-record";
+import { readEnv } from "@/lib/read-env";
 
 declare global {
   var aveskaJobWorkerStarted: boolean | undefined;
@@ -94,7 +95,7 @@ async function loop() {
 }
 
 export function startJobWorker() {
-  if (process.env.AVESKA_RUNTIME === "worker") return;
+  if (readEnv("AVESKA_RUNTIME") === "worker") return;
   if (globalThis.aveskaJobWorkerStarted) return;
   globalThis.aveskaJobWorkerStarted = true;
   console.log("Aveska in-process job worker started");

@@ -1,4 +1,5 @@
 import type { R2Bucket } from "@/types/cloudflare-bindings";
+import { readEnv } from "@/lib/read-env";
 
 const globalStore = globalThis as unknown as { aveskaUploads?: R2Bucket };
 
@@ -16,7 +17,7 @@ export async function saveUpload(relativeName: string, data: Buffer | Uint8Array
     await globalStore.aveskaUploads.put(key, data);
     return `uploads/${key}`;
   }
-  if (process.env.AVESKA_RUNTIME === "worker") {
+  if (readEnv("AVESKA_RUNTIME") === "worker") {
     throw new Error("File uploads need an R2 bucket. Enable R2 and bind UPLOADS in wrangler.toml.");
   }
   const { mkdir, writeFile } = await import("fs/promises");
@@ -34,7 +35,7 @@ export async function deleteUpload(filePath: string) {
     await globalStore.aveskaUploads.delete(key);
     return;
   }
-  if (process.env.AVESKA_RUNTIME === "worker") return;
+  if (readEnv("AVESKA_RUNTIME") === "worker") return;
   const { unlink } = await import("fs/promises");
   await unlink(filePath).catch(() => undefined);
 }

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { isEphemeralTrackingOrigin, isStableTrackingOrigin, pickTrackingBaseUrl, railwayPublicOrigin, trackingLinkLabel } from "@/lib/email/tracking";
+import { readEnv } from "@/lib/read-env";
 
 export {
   publicAppUrl,
@@ -59,12 +60,12 @@ export async function resolveTrackingBaseUrl() {
   const stored = await loadTrackingUrl();
   const picked = pickTrackingBaseUrl({
     stored,
-    trackingUrl: process.env.TRACKING_URL,
-    railwayPublicDomain: process.env.RAILWAY_PUBLIC_DOMAIN,
-    railwayStaticUrl: process.env.RAILWAY_STATIC_URL,
-    authUrl: process.env.AUTH_URL,
-    nextAuthUrl: process.env.NEXTAUTH_URL,
-    production: process.env.NODE_ENV === "production",
+    trackingUrl: readEnv("TRACKING_URL"),
+    railwayPublicDomain: readEnv("RAILWAY_PUBLIC_DOMAIN"),
+    railwayStaticUrl: readEnv("RAILWAY_STATIC_URL"),
+    authUrl: readEnv("AUTH_URL"),
+    nextAuthUrl: readEnv("NEXTAUTH_URL"),
+    production: readEnv("NODE_ENV") === "production" || readEnv("AVESKA_RUNTIME") === "worker",
   });
   if (picked && isStableTrackingOrigin(picked) && isEphemeralTrackingOrigin(stored)) {
     await saveTrackingUrl(picked).catch(() => null);

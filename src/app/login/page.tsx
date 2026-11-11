@@ -17,9 +17,10 @@ export default function LoginPage() {
         password: String(formData.get("password") ?? ""),
       }),
     });
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
     setPending(false);
     if (!res.ok) {
-      setError("Invalid email or password");
+      setError(data.error ?? "Could not sign in. Try again.");
       return;
     }
     window.location.assign("/");

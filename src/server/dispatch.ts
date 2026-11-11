@@ -5,8 +5,6 @@ import { handleView } from "@/server/views";
 
 type Handler = (request: Request, context: { params: Promise<Record<string, string>> }) => Promise<Response> | Response;
 
-type RouteModule = Record<string, Handler | undefined>;
-
 type Route = {
   method: string;
   pattern: RegExp;

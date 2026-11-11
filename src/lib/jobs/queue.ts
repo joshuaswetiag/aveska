@@ -8,6 +8,7 @@ import { generateRecommendations } from "@/lib/recommendation/generate";
 import { generateCampaign } from "@/lib/campaign/generate";
 import { runDemo } from "@/lib/demo/run-demo";
 import { readUpload } from "@/lib/storage";
+import { readEnv } from "@/lib/read-env";
 
 export async function enqueueJob(input: {
   type: JobType;
@@ -174,8 +175,61 @@ export async function processNextJob(jobId?: string) {
         type?: "CROSS_SELL";
         from?: string;
         to?: string;
+        phase?: "sync" | "generate";
+        orderPage?: number;
+        orderPass?: "placed" | "updated";
+        importedOrders?: number;
       };
-      const campaign = await generateCampaign(payload, progress);
+      const onWorker = Boolean((globalThis as { aveskaD1?: unknown }).aveskaD1);
+      if (onWorker && payload.from && payload.to && (payload.phase ?? "sync") === "sync") {
+        const { syncNetoOrders } = await import("@/lib/catalogue/neto-orders");
+        const pass = payload.orderPass ?? "placed";
+        const chunk = await syncNetoOrders(progress, {
+          from: payload.from,
+          to: payload.to,
+          pass,
+          startPage: payload.orderPage ?? 0,
+          importedSoFar: payload.importedOrders ?? 0,
+          timeBudgetMs: 8_000,
+          maxPages: 1,
+          skipBackfill: true,
+        });
+        if (!chunk.done) {
+          await prisma.job.updateMany({
+            where: { id: job.id, status: "RUNNING" },
+            data: {
+              status: "QUEUED",
+              payload: { ...payload, phase: "sync", orderPass: pass, orderPage: chunk.nextPage, importedOrders: chunk.imported },
+              message: `Imported ${chunk.imported.toLocaleString()} orders. Continuing…`,
+              errorMessage: null,
+            },
+          });
+          return job.id;
+        }
+        if (pass === "placed" && readEnv("NETO_ORDERS_INCLUDE_UPDATED") !== "0") {
+          await prisma.job.updateMany({
+            where: { id: job.id, status: "RUNNING" },
+            data: {
+              status: "QUEUED",
+              payload: { ...payload, phase: "sync", orderPass: "updated", orderPage: 0, importedOrders: chunk.imported },
+              message: "Syncing updated orders…",
+              errorMessage: null,
+            },
+          });
+          return job.id;
+        }
+        await prisma.job.updateMany({
+          where: { id: job.id, status: "RUNNING" },
+          data: {
+            status: "QUEUED",
+            payload: { ...payload, phase: "generate", importedOrders: chunk.imported },
+            message: "Building promotions…",
+            errorMessage: null,
+          },
+        });
+        return job.id;
+      }
+      const campaign = await generateCampaign({ ...payload, syncOrders: onWorker ? false : payload.phase === "generate" ? false : undefined }, progress);
       const recipients = await prisma.campaignRecipient.count({ where: { campaignId: campaign.id } });
       const stats = (campaign as { generateStats?: Record<string, unknown> }).generateStats;
       result = { campaignId: campaign.id, recipients, ...stats };
@@ -243,7 +297,51 @@ export async function processNextJob(jobId?: string) {
         result = advanced.result as object;
       } else if (payload.kind === "orders") {
         const { syncNetoOrders } = await import("@/lib/catalogue/neto-orders");
-        result = await syncNetoOrders(progress, { from: payload.from, to: payload.to });
+        const onWorker = Boolean((globalThis as { aveskaD1?: unknown }).aveskaD1);
+        const orderPayload = payload as {
+          kind?: string;
+          from?: string;
+          to?: string;
+          orderPage?: number;
+          orderPass?: "placed" | "updated";
+          importedOrders?: number;
+        };
+        const pass = orderPayload.orderPass ?? "placed";
+        const chunk = await syncNetoOrders(progress, {
+          from: payload.from,
+          to: payload.to,
+          pass: onWorker ? pass : undefined,
+          startPage: onWorker ? orderPayload.orderPage ?? 0 : undefined,
+          importedSoFar: onWorker ? orderPayload.importedOrders ?? 0 : undefined,
+          timeBudgetMs: onWorker ? 8_000 : undefined,
+          maxPages: onWorker ? 1 : undefined,
+          skipBackfill: onWorker,
+        });
+        if (onWorker && !chunk.done) {
+          await prisma.job.updateMany({
+            where: { id: job.id, status: "RUNNING" },
+            data: {
+              status: "QUEUED",
+              payload: { ...orderPayload, orderPass: pass, orderPage: chunk.nextPage, importedOrders: chunk.imported },
+              message: `Imported ${chunk.imported.toLocaleString()} orders. Continuing…`,
+              errorMessage: null,
+            },
+          });
+          return job.id;
+        }
+        if (onWorker && pass === "placed" && readEnv("NETO_ORDERS_INCLUDE_UPDATED") !== "0") {
+          await prisma.job.updateMany({
+            where: { id: job.id, status: "RUNNING" },
+            data: {
+              status: "QUEUED",
+              payload: { ...orderPayload, orderPass: "updated", orderPage: 0, importedOrders: chunk.imported },
+              message: "Syncing updated orders…",
+              errorMessage: null,
+            },
+          });
+          return job.id;
+        }
+        result = chunk;
       } else {
         const { syncNetoCatalogue } = await import("@/lib/catalogue/neto");
         const chunk = await syncNetoCatalogue(progress, {

@@ -8,6 +8,7 @@ import { loadMailSettings } from "@/lib/email/settings-store";
 import { getEmailTransport } from "@/lib/email/smtp";
 import { eligibleRecipients } from "@/lib/campaign/send-targets";
 import { unsubscribeUrl } from "@/lib/campaign/unsubscribe-token";
+import { readEnv } from "@/lib/read-env";
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -45,7 +46,7 @@ export async function sendCampaign(
     throw new Error("Email sending is not configured. Add SMTP details under Settings.");
   }
   const trackingBase = await resolveTrackingBaseUrl();
-  if (process.env.NODE_ENV === "production" && !isStableTrackingOrigin(trackingBase)) {
+  if ((readEnv("NODE_ENV") === "production" || readEnv("AVESKA_RUNTIME") === "worker") && !isStableTrackingOrigin(trackingBase)) {
     throw new Error(
       "Set AUTH_URL and TRACKING_URL to the Cloudflare https URL so click tracking works worldwide.",
     );
@@ -231,7 +232,7 @@ export async function sendCampaign(
           .catch(() => undefined);
       }
       if (config.delayMs) await sleep(config.delayMs);
-      const onWorker = process.env.AVESKA_RUNTIME === "worker";
+      const onWorker = readEnv("AVESKA_RUNTIME") === "worker";
       if (onWorker && Date.now() - startedAt > 20_000 && index < candidates.length - 1) {
         paused = true;
         break;

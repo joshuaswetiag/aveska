@@ -9,6 +9,7 @@ import { isEbayMemberEmail } from "@/lib/campaign/send-targets";
 import { isLiveOrderStatus } from "@/lib/catalogue/neto-orders";
 import type { CampaignType, RecommendationStatus } from "@prisma/client";
 import type { FitmentProfile } from "@/types";
+import { readEnv } from "@/lib/read-env";
 
 export type CampaignGenerateInput = {
   name: string;
@@ -122,7 +123,7 @@ async function generateFromOrderRange(
   const from = input.from!;
   const to = input.to!;
   let synced: CampaignGenerateStats["synced"];
-  if (input.syncOrders !== false && process.env.NETO_API_KEY?.trim()) {
+  if (input.syncOrders !== false && readEnv("NETO_API_KEY")?.trim()) {
     await onProgress?.(0, 1, `Syncing Aveska orders ${from} to ${to}…`);
     const { syncNetoOrders } = await import("@/lib/catalogue/neto-orders");
     const syncResult = await syncNetoOrders(onProgress, { from, to });

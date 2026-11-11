@@ -1,5 +1,7 @@
+import { readEnv } from "@/lib/read-env";
+
 export function storeOrigin() {
-  const api = process.env.NETO_API_URL || "https://www.aveska.com.au/do/WS/NetoAPI";
+  const api = readEnv("NETO_API_URL") || "https://www.aveska.com.au/do/WS/NetoAPI";
   try {
     const parsed = new URL(api);
     return `${parsed.protocol}//${parsed.host}`;

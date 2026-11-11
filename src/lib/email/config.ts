@@ -1,4 +1,5 @@
 import { openSecret } from "@/lib/email/secret-box";
+import { readEnv } from "@/lib/read-env";
 import { normalizeEmail } from "@/lib/utils";
 
 export type MailProviderName = "export" | "smtp" | "maropost" | "resend";
@@ -37,12 +38,12 @@ export type MailConfig = {
 };
 
 function env(name: string) {
-  const value = process.env[name]?.trim();
+  const value = readEnv(name)?.trim();
   return value || null;
 }
 
 export function runningOnRailway() {
-  return Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
+  return Boolean(readEnv("RAILWAY_ENVIRONMENT") || readEnv("RAILWAY_PROJECT_ID"));
 }
 
 function text(stored: string | null | undefined, envName: string) {

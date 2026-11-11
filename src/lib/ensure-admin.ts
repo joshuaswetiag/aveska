@@ -1,13 +1,14 @@
-import { hash } from "bcryptjs";
 import { prisma } from "@/lib/db";
+import { hashPassword } from "@/lib/password";
+import { readEnv } from "@/lib/read-env";
 
 /** Create the first admin from ADMIN_EMAIL / ADMIN_PASSWORD. Never resets an existing user. */
 export async function ensureFirstAdmin() {
   if (await prisma.user.count()) return;
-  const password = process.env.ADMIN_PASSWORD?.trim();
+  const password = readEnv("ADMIN_PASSWORD")?.trim();
   if (!password || password === "change-me") return;
-  const email = (process.env.ADMIN_EMAIL || "admin@aveska.local").trim().toLowerCase();
-  const passwordHash = await hash(password, 12);
+  const email = (readEnv("ADMIN_EMAIL") || "admin@aveska.local").trim().toLowerCase();
+  const passwordHash = hashPassword(password);
   await prisma.user.create({
     data: { email, passwordHash, role: "ADMIN", name: "Aveska Admin" },
   });
@@ -24,9 +25,9 @@ export async function ensureFirstAdmin() {
 }
 
 export async function ensureAdminUser() {
-  const email = (process.env.ADMIN_EMAIL || "admin@aveska.local").trim().toLowerCase();
-  const password = process.env.ADMIN_PASSWORD || "change-me";
-  const passwordHash = await hash(password, 12);
+  const email = (readEnv("ADMIN_EMAIL") || "admin@aveska.local").trim().toLowerCase();
+  const password = readEnv("ADMIN_PASSWORD") || "change-me";
+  const passwordHash = hashPassword(password);
 
   await prisma.user.upsert({
     where: { email },

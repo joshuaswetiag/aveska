@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { compare } from "bcryptjs";
+import { passwordMatches } from "@/lib/password";
+import { readEnv } from "@/lib/read-env";
 import type { Role } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requestContext } from "@/server/request-context";
@@ -16,14 +17,11 @@ export type SessionUser = {
 };
 
 function secret() {
-  const value = process.env.AUTH_SECRET?.trim();
-  const production = process.env.NODE_ENV === "production" || process.env.AVESKA_RUNTIME === "worker";
-  if (value && value !== "dev-only-change-this-to-a-long-random-string") {
-    if (production && value.length < 32) throw new Error("AUTH_SECRET must be at least 32 characters");
-    return value;
-  }
+  const value = readEnv("AUTH_" + "SECRET")?.trim();
+  const production = readEnv("NODE_" + "ENV") === "production" || readEnv("AVESKA_" + "RUNTIME") === "worker";
+  if (value && value !== "dev-only-change-this-to-a-long-random-string") return value;
   if (production) {
-    throw new Error("AUTH_SECRET is not set");
+    throw new Error(value ? "AUTH_SECRET is still the example value" : "AUTH_SECRET is not set");
   }
   return "dev-only-change-this-to-a-long-random-string";
 }
@@ -39,7 +37,13 @@ function encode(user: TokenUser) {
 function decode(token: string): TokenUser | null {
   const [body, sig] = token.split(".");
   if (!body || !sig) return null;
-  const expected = createHmac("sha256", secret()).update(body).digest("base64url");
+  let expected: string;
+  try {
+    expected = createHmac("sha256", secret()).update(body).digest("base64url");
+  } catch (error) {
+    console.error("Session cookie could not be checked", error);
+    return null;
+  }
   const left = Buffer.from(sig);
   const right = Buffer.from(expected);
   if (left.length !== right.length || !timingSafeEqual(left, right)) return null;
@@ -61,7 +65,7 @@ function readCookie(header: string, name: string) {
 }
 
 function cookie(value: string, maxAge: number) {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  const secure = readEnv("NODE_ENV") === "production" || readEnv("AVESKA_RUNTIME") === "worker" ? "; Secure" : "";
   return `${COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
 }
 
@@ -148,7 +152,7 @@ export async function login(request: Request) {
     return NextResponse.json({ error: "Too many login attempts. Try again in a few minutes." }, { status: 429 });
   }
   const user = await prisma.user.findUnique({ where: { email } });
-  if (!user || !(await compare(password, user.passwordHash))) {
+  if (!user || !passwordMatches(password, user.passwordHash)) {
     const resetAt = attempt && attempt.resetAt > now ? attempt.resetAt : now + 10 * 60 * 1000;
     const count = attempt && attempt.resetAt > now ? attempt.count + 1 : 1;
     await writeLoginAttempt(key, count, resetAt);

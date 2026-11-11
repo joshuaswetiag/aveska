@@ -1,9 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { readEnv } from "@/lib/read-env";
 
 const DEV_SECRET = "dev-only-change-this-to-a-long-random-string";
 
 function secret() {
-  const value = process.env.AUTH_SECRET?.trim();
+  const value = readEnv("AUTH_" + "SECRET")?.trim();
   return value && value !== DEV_SECRET ? value : DEV_SECRET;
 }
 

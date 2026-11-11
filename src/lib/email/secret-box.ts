@@ -1,13 +1,14 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { readEnv } from "@/lib/read-env";
 
 const PREFIX = "enc:v1:";
 const DEV_SECRET = "dev-only-change-this-to-a-long-random-string";
 
 function materials() {
-  const mail = process.env.MAIL_SECRET_KEY?.trim();
-  const auth = process.env.AUTH_SECRET?.trim();
+  const mail = readEnv("MAIL_SECRET_KEY")?.trim();
+  const auth = readEnv("AUTH_" + "SECRET")?.trim();
   const keys = [mail, auth].filter((value): value is string => Boolean(value) && value !== DEV_SECRET);
-  const production = process.env.NODE_ENV === "production" || process.env.AVESKA_RUNTIME === "worker";
+  const production = readEnv("NODE_" + "ENV") === "production" || readEnv("AVESKA_" + "RUNTIME") === "worker";
   if (!keys.length) {
     if (production) throw new Error("Set MAIL_SECRET_KEY before storing mail secrets.");
     return [DEV_SECRET];

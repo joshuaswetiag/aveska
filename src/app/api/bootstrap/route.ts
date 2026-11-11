@@ -2,10 +2,11 @@ import { NextResponse } from "@/server/next-response";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
 import { startJobWorker } from "@/lib/jobs/worker";
-import { FULL_SYNC_FROM, ensureFullSyncQueued, listFullSyncJobs } from "@/lib/catalogue/full-sync";
+import { fullSyncFrom, ensureFullSyncQueued, listFullSyncJobs } from "@/lib/catalogue/full-sync";
 import { fromCents } from "@/lib/money";
 import { internalError } from "@/server/http-error";
 import { storeIsoDate } from "@/lib/utils";
+import { readEnv } from "@/lib/read-env";
 
 export const dynamic = "force-dynamic";
 
@@ -63,10 +64,10 @@ export async function GET() {
     await ensureJobTypeEnum();
     const stats = await counts();
     // Secrets are injected per-request on Workers; existing catalogue also means Neto was configured.
-    const netoConfigured = Boolean(process.env.NETO_API_KEY?.trim()) || stats.products > 0;
+    const netoConfigured = Boolean(readEnv("NETO_API_KEY")?.trim()) || stats.products > 0;
     let job = null as Awaited<ReturnType<typeof ensureFullSyncQueued>>;
     let enqueueError = "";
-    if (!process.env.NETO_API_KEY?.trim() && stats.products === 0 && stats.orders === 0) {
+    if (!readEnv("NETO_API_KEY")?.trim() && stats.products === 0 && stats.orders === 0) {
       return json({
         ready: true,
         netoConfigured: false,
@@ -75,17 +76,17 @@ export async function GET() {
         workerStarted: Boolean(globalThis.aveskaJobWorkerStarted),
         job: null,
         counts: stats,
-        from: FULL_SYNC_FROM,
+        from: fullSyncFrom(),
         to: storeIsoDate(),
       });
     }
-    if (!process.env.NETO_API_KEY?.trim() && stats.products === 0) {
+    if (!readEnv("NETO_API_KEY")?.trim() && stats.products === 0) {
       enqueueError = "NETO_API_KEY is not set on this running app.";
-    } else if (!process.env.NETO_API_KEY?.trim() && stats.products > 0) {
+    } else if (!readEnv("NETO_API_KEY")?.trim() && stats.products > 0) {
       // Key missing this request but store already has data — don't block the UI.
       enqueueError = "";
     }
-    if (process.env.NETO_API_KEY?.trim()) {
+    if (readEnv("NETO_API_KEY")?.trim()) {
       try {
         job = await ensureFullSyncQueued(session.user.id);
       } catch (error) {
@@ -109,7 +110,7 @@ export async function GET() {
       workerStarted: Boolean(globalThis.aveskaJobWorkerStarted),
       job: serializeJob(active ?? failed ?? completed ?? job),
       counts: stats,
-      from: FULL_SYNC_FROM,
+      from: fullSyncFrom(),
       to: storeIsoDate(),
     });
   } catch (error) {
@@ -118,7 +119,7 @@ export async function GET() {
       {
         error: message,
         ready: false,
-        netoConfigured: Boolean(process.env.NETO_API_KEY?.trim()),
+        netoConfigured: Boolean(readEnv("NETO_API_KEY")?.trim()),
         needsSync: true,
         job: null,
         counts: { customers: 0, orders: 0, products: 0, vehicles: 0, recommendations: 0, revenue: 0 },
@@ -132,7 +133,7 @@ export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user) return json({ error: "Unauthorized" }, 401);
   if (session.user.role === "READONLY") return json({ error: "Forbidden" }, 403);
-  if (!process.env.NETO_API_KEY?.trim()) {
+  if (!readEnv("NETO_API_KEY")?.trim()) {
     return json({ error: "NETO_API_KEY is not configured" }, 400);
   }
   const body = (await request.json().catch(() => ({}))) as { force?: boolean };

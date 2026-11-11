@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { isLiveOrderStatus } from "@/lib/catalogue/neto-orders";
 import { createManyIgnoreDuplicates } from "@/lib/create-many-safe";
-import { asStringArray, toJsonArray } from "@/lib/json-array";
+import { asStringArray } from "@/lib/json-array";
 import type { LearnedVehicleKnowledge, VehicleExtraction } from "@/types";
 import { extractVehicle, canonicalVehicleName, vehicleSearchText, isIdentifiedVehicle } from "@/lib/vehicle/extract";
 import { looksLikeProductTitle } from "@/lib/vehicle/dictionary";

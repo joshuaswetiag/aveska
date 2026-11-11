@@ -4,6 +4,7 @@ import { enqueueJob } from "@/lib/jobs/queue";
 import { syncNetoCatalogue } from "@/lib/catalogue/neto";
 import { syncNetoOrders } from "@/lib/catalogue/neto-orders";
 import { extractCatalogueFitments, extractCatalogueFitmentChunk, harvestVehiclesFromOrderLines, linkOrderVehiclesChunk } from "@/lib/vehicle/persist";
+import { readEnv } from "@/lib/read-env";
 
 /** Default order history window for first-load sync (override with NETO_ORDERS_FROM). */
 function defaultOrdersFrom() {
@@ -12,7 +13,9 @@ function defaultOrdersFrom() {
   return date.toISOString().slice(0, 10);
 }
 
-export const FULL_SYNC_FROM = process.env.NETO_ORDERS_FROM?.trim() || defaultOrdersFrom();
+export function fullSyncFrom() {
+  return readEnv("NETO_ORDERS_FROM")?.trim() || defaultOrdersFrom();
+}
 
 export type FullSyncPayload = {
   kind: "full";
@@ -37,7 +40,7 @@ export function isFullSyncJob(payload: unknown) {
 }
 
 function isWorkerRuntime() {
-  if (process.env.AVESKA_RUNTIME === "worker") return true;
+  if (readEnv("AVESKA_RUNTIME") === "worker") return true;
   const g = globalThis as {
     aveskaD1?: unknown;
     Cloudflare?: unknown;
@@ -63,7 +66,7 @@ export async function syncFullAveskaStore(
   options?: { refreshNeto?: boolean },
 ) {
   const to = storeIsoDate();
-  const from = FULL_SYNC_FROM;
+  const from = fullSyncFrom();
   void options;
 
   await onProgress?.(1, 100, "Syncing live Aveska products…");
@@ -108,7 +111,7 @@ export async function advanceFullSync(
   const windowTooSmall =
     Boolean(payload.from && payload.to && payload.from >= payload.to) ||
     Boolean(payload.from && payload.to && Date.parse(payload.to) - Date.parse(payload.from) < 30 * 86400000);
-  const from = windowTooSmall ? defaultFrom : payload.from || process.env.NETO_ORDERS_FROM?.trim() || defaultFrom;
+  const from = windowTooSmall ? defaultFrom : payload.from || readEnv("NETO_ORDERS_FROM")?.trim() || defaultFrom;
   const to = payload.to || storeIsoDate();
   const state: FullSyncPayload = {
     ...payload,
@@ -186,7 +189,7 @@ export async function advanceFullSync(
       if (!chunk.done) {
         return { done: false, payload: state, result: chunk };
       }
-      if ((state.orderPass ?? "placed") === "placed" && process.env.NETO_ORDERS_INCLUDE_UPDATED !== "0") {
+      if ((state.orderPass ?? "placed") === "placed" && readEnv("NETO_ORDERS_INCLUDE_UPDATED") !== "0") {
         state.orderPass = "updated";
         state.orderPage = 0;
         return { done: false, payload: state, result: chunk };
@@ -291,7 +294,7 @@ export async function listFullSyncJobs() {
 }
 
 export async function ensureFullSyncQueued(createdById?: string, force = false) {
-  if (!process.env.NETO_API_KEY?.trim()) return null;
+  if (!readEnv("NETO_API_KEY")?.trim()) return null;
   const fullJobs = await listFullSyncJobs();
   const activeJobs = fullJobs.filter((job) => job.status === "QUEUED" || job.status === "RUNNING");
   if (activeJobs.length > 1) {
@@ -318,13 +321,13 @@ export async function ensureFullSyncQueued(createdById?: string, force = false) 
     type: "NETO_SYNC",
     payload: {
       kind: "full",
-      from: isWorkerRuntime() && !process.env.NETO_ORDERS_FROM?.trim()
+      from: isWorkerRuntime() && !readEnv("NETO_ORDERS_FROM")?.trim()
         ? (() => {
             const date = new Date();
             date.setMonth(date.getMonth() - 18);
             return date.toISOString().slice(0, 10);
           })()
-        : FULL_SYNC_FROM,
+        : fullSyncFrom(),
       to: storeIsoDate(),
       phase: "products",
       productPage: 0,

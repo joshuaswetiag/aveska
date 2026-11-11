@@ -5,6 +5,7 @@ import { extractVehicle } from "@/lib/vehicle/extract";
 import { looksLikeProductTitle } from "@/lib/vehicle/dictionary";
 import { normalizeKey, normalizeWhitespace, parseNumber } from "@/lib/utils";
 import { productPageUrl } from "@/lib/catalogue/product-url";
+import { readEnv } from "@/lib/read-env";
 import type { StockStatus } from "@prisma/client";
 
 type NetoResponse<T> = {
@@ -120,8 +121,8 @@ function stockStatus(item: NetoItem): StockStatus {
 }
 
 export async function netoRequest<T>(action: string, body: object): Promise<NetoResponse<T>> {
-  const url = process.env.NETO_API_URL || "https://www.aveska.com.au/do/WS/NetoAPI";
-  const key = process.env.NETO_API_KEY?.trim();
+  const url = readEnv("NETO_API_URL") || "https://www.aveska.com.au/do/WS/NetoAPI";
+  const key = readEnv("NETO_API_KEY")?.trim();
   if (!key) throw new Error("NETO_API_KEY is not set in .env");
 
   const headers: Record<string, string> = {
@@ -130,8 +131,9 @@ export async function netoRequest<T>(action: string, body: object): Promise<Neto
     NETOAPI_ACTION: action,
     NETOAPI_KEY: key,
   };
-  if (process.env.NETO_API_USERNAME?.trim()) {
-    headers.NETOAPI_USERNAME = process.env.NETO_API_USERNAME.trim();
+  const username = readEnv("NETO_API_USERNAME")?.trim();
+  if (username) {
+    headers.NETOAPI_USERNAME = username;
   }
 
   const response = await fetch(url, {
@@ -192,7 +194,7 @@ export async function syncNetoCatalogue(
   const extractVehicles = options?.extractVehicles !== false;
   // Neto often returns TotalRecords=0; only an empty page means the catalogue is finished.
   // Keep pages modest so a Worker can finish and checkpoint before it is cancelled.
-  const pageSize = options?.pageSize || Number(process.env.NETO_PRODUCT_PAGE_SIZE ?? 80) || 80;
+  const pageSize = options?.pageSize || Number(readEnv("NETO_PRODUCT_PAGE_SIZE") ?? 80) || 80;
   const maxPages = options?.maxPages ?? Number.POSITIVE_INFINITY;
   const deadline = options?.timeBudgetMs ? Date.now() + options.timeBudgetMs : Number.POSITIVE_INFINITY;
   let page = options?.startPage ?? 0;

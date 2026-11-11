@@ -4,12 +4,13 @@ import { enqueueJob } from "@/lib/jobs/queue";
 import { runJobInBackground } from "@/lib/jobs/run-in-background";
 import { audit } from "@/lib/audit";
 import { parseOrderSyncRange } from "@/lib/catalogue/neto-orders";
+import { readEnv } from "@/lib/read-env";
 
 export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (session.user.role === "READONLY") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  if (!process.env.NETO_API_KEY) {
+  if (!readEnv("NETO_API_KEY")) {
     return NextResponse.json({ error: "NETO_API_KEY is not configured" }, { status: 400 });
   }
   const body = (await request.json().catch(() => ({}))) as { from?: string; to?: string };

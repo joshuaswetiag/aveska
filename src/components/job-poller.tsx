@@ -9,7 +9,7 @@ export function JobPoller({ id, status }: { id: string; status: string }) {
   useEffect(() => {
     if (status === "COMPLETED" || status === "FAILED" || status === "CANCELLED") return;
     const kick = () => {
-      if (status !== "QUEUED") return;
+      if (status !== "QUEUED" && status !== "RUNNING") return;
       void fetch(`/api/jobs/${id}/process`, { method: "POST" }).catch(() => undefined);
     };
     if (kicked.current !== id) {

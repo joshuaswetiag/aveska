@@ -7,6 +7,7 @@ import { detectColumnMapping } from "@/lib/import/columns";
 import type { ImportType } from "@prisma/client";
 import { audit } from "@/lib/audit";
 import { saveUpload } from "@/lib/storage";
+import { readEnv } from "@/lib/read-env";
 
 const ALLOWED = [".csv", ".xlsx", ".xls", ".json", ".txt"];
 
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
   if (!ALLOWED.includes(ext)) {
     return NextResponse.json({ error: "Unsupported file type. Use CSV, XLSX, or JSON." }, { status: 400 });
   }
-  const maxMb = Number(process.env.MAX_UPLOAD_MB ?? 25);
+  const maxMb = Number(readEnv("MAX_UPLOAD_MB") ?? 25);
   if (file.size > maxMb * 1024 * 1024) {
     return NextResponse.json({ error: `File exceeds ${maxMb}MB limit` }, { status: 400 });
   }
