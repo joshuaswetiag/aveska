@@ -41,12 +41,6 @@ async function main() {
       },
       include: { recipients: { take: 1 } },
     });
-  } else if (!["APPROVED", "EXPORTED", "SENDING", "SENT"].includes(campaign.status)) {
-    campaign = await prisma.campaign.update({
-      where: { id: campaign.id },
-      data: { status: "APPROVED", approvedAt: new Date() },
-      include: { recipients: { take: 1, orderBy: { createdAt: "asc" } } },
-    });
   }
 
   const settings = await loadMailSettings();
@@ -58,19 +52,6 @@ async function main() {
   if (!rawHtml) throw new Error("Campaign has no HTML to send.");
 
   const previewHtml = restyleCampaignHtml(rawHtml);
-  if (campaign.recipients[0]?.id) {
-    await prisma.campaignRecipient.update({
-      where: { id: campaign.recipients[0].id },
-      data: { bodyHtml: previewHtml },
-    });
-  }
-  if (campaign.bodyHtml) {
-    await prisma.campaign.update({
-      where: { id: campaign.id },
-      data: { bodyHtml: restyleCampaignHtml(campaign.bodyHtml) },
-    });
-  }
-
   const outbound = htmlWithInlineLogo(previewHtml);
   const info = await nodemailer.createTransport({
     host: config.host,

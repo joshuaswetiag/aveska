@@ -81,6 +81,25 @@ describe("vehicle extraction", () => {
     expect(result.series).toContain("ZX9");
   });
 
+  it("keeps Golf MK2 on Volkswagen when Ford also uses MK2", () => {
+    const result = extractVehicle({ name: "Carpet set to suit Golf MK2" });
+    expect(result.make).toBe("Volkswagen");
+    expect(result.vehicleFamily).toBe("Golf");
+    expect(result.series).toContain("MK2");
+  });
+
+  it("keeps Valiant VH on Chrysler when Holden also uses VH", () => {
+    const result = extractVehicle({ name: "Front seat to suit Valiant VH" });
+    expect(result.make).toBe("Chrysler");
+    expect(result.vehicleFamily).toBe("Valiant");
+    expect(result.series).toContain("VH");
+  });
+
+  it("treats Datsun as its own make", () => {
+    const result = extractVehicle({ name: "Radiator to suit Datsun 1200" });
+    expect(result.make).toBe("Datsun");
+  });
+
   it("treats make plus series as an identified vehicle", () => {
     expect(isIdentifiedVehicle({ make: "Holden", series: ["EJ", "EH"], vehicleFamily: "Kingswood" })).toBe(true);
     expect(isIdentifiedVehicle({ make: "Nissan", series: [], vehicleFamily: null, model: null })).toBe(false);

@@ -52,6 +52,10 @@ export async function processNextJob(jobId?: string) {
         return !(row.status === "QUEUED" && next && Date.parse(next) > now);
       }) ?? null;
   if (!job || job.status === "COMPLETED" || job.status === "CANCELLED") return job?.id ?? null;
+  if (job.status === "QUEUED") {
+    const next = jobMeta(job.payload).nextRunAt;
+    if (next && Date.parse(next) > Date.now()) return job.id;
+  }
   if (job.status === "FAILED" && !jobId) return null;
   if (job.status !== "QUEUED" && job.status !== "RUNNING" && job.status !== "FAILED") return null;
 
@@ -59,6 +63,19 @@ export async function processNextJob(jobId?: string) {
   (globalThis as { aveskaJobsInFlight?: Set<string> }).aveskaJobsInFlight = inflight;
   if (inflight.has(job.id)) return job.id;
   if (job.status === "RUNNING" && Date.now() - job.updatedAt.getTime() < 45_000) return job.id;
+  const reclaimAttempts = job.status === "RUNNING" ? (jobMeta(job.payload).attempts ?? 0) + 1 : 0;
+  if (job.status === "RUNNING" && reclaimAttempts >= 5) {
+    await prisma.job.updateMany({
+      where: { id: job.id, status: "RUNNING", updatedAt: job.updatedAt },
+      data: {
+        status: "FAILED",
+        errorMessage: "Stopped after the job crashed repeatedly",
+        completedAt: new Date(),
+        payload: { ...((job.payload ?? {}) as object), attempts: reclaimAttempts },
+      },
+    });
+    return job.id;
+  }
   inflight.add(job.id);
 
   try {
@@ -67,10 +84,14 @@ export async function processNextJob(jobId?: string) {
         job.status === "RUNNING"
           ? { id: job.id, status: "RUNNING", updatedAt: job.updatedAt }
           : { id: job.id, status: job.status === "FAILED" ? "FAILED" : "QUEUED" },
-      data:
-        job.progress > 0
-          ? { status: "RUNNING", errorMessage: null }
-          : { status: "RUNNING", startedAt: new Date(), message: "Starting…", errorMessage: null },
+      data: {
+        ...(job.progress > 0
+          ? { status: "RUNNING" as const, errorMessage: null }
+          : { status: "RUNNING" as const, startedAt: new Date(), message: "Starting…", errorMessage: null }),
+        ...(reclaimAttempts > 0
+          ? { payload: { ...((job.payload ?? {}) as object), attempts: reclaimAttempts } }
+          : {}),
+      },
     });
     if (claimed.count === 0) return job.id;
 
@@ -112,12 +133,38 @@ export async function processNextJob(jobId?: string) {
       await extractCatalogueFitments(progress);
       await extractOrderVehicles(progress);
       result = { ok: true };
-    } else if (job.type === "GENERATE_RECOMMENDATIONS") {
-      result = await generateRecommendations({ onProgress: progress });
-    } else if (job.type === "ANALYSE_CUSTOMERS") {
-      await extractCatalogueFitments(progress);
-      await extractOrderVehicles(progress);
-      result = await generateRecommendations({ onProgress: progress });
+    } else if (job.type === "GENERATE_RECOMMENDATIONS" || job.type === "ANALYSE_CUSTOMERS") {
+      const payload = (job.payload ?? {}) as { cursor?: string | null; phase?: string };
+      if (job.type === "ANALYSE_CUSTOMERS" && payload.phase !== "recommendations") {
+        await extractCatalogueFitments(progress);
+        await extractOrderVehicles(progress);
+        await prisma.job.updateMany({
+          where: { id: job.id, status: "RUNNING" },
+          data: {
+            status: "QUEUED",
+            payload: { ...payload, phase: "recommendations", cursor: null },
+            message: "Continuing recommendations…",
+          },
+        });
+        return job.id;
+      }
+      const pass = await generateRecommendations({
+        onProgress: progress,
+        cursor: payload.cursor,
+        maxCustomers: 25,
+      });
+      if (!pass.finished) {
+        await prisma.job.updateMany({
+          where: { id: job.id, status: "RUNNING" },
+          data: {
+            status: "QUEUED",
+            payload: { ...payload, phase: "recommendations", cursor: pass.cursor },
+            message: "Continuing recommendations…",
+          },
+        });
+        return job.id;
+      }
+      result = pass;
     } else if (job.type === "GENERATE_CAMPAIGN") {
       const payload = (job.payload ?? {}) as {
         name: string;
@@ -140,6 +187,7 @@ export async function processNextJob(jobId?: string) {
         phase?: string;
         productPage?: number;
         orderPage?: number;
+        orderPass?: "placed" | "updated";
         importedProducts?: number;
         importedOrders?: number;
         refreshNeto?: boolean;
@@ -157,6 +205,7 @@ export async function processNextJob(jobId?: string) {
             linkCursor: (payload as { linkCursor?: string | null }).linkCursor,
             productPage: payload.productPage,
             orderPage: payload.orderPage,
+            orderPass: payload.orderPass,
             importedProducts: payload.importedProducts,
             importedOrders: payload.importedOrders,
             refreshNeto: payload.refreshNeto,
@@ -265,11 +314,13 @@ export async function processNextJob(jobId?: string) {
     return job.id;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Job failed";
+    const current = await prisma.job.findUnique({ where: { id: job.id }, select: { status: true } });
+    if (message === "Sync was cancelled" || current?.status === "CANCELLED") return job.id;
     const attempts = (jobMeta(job.payload).attempts ?? 0) + 1;
-    if (job.type === "NETO_SYNC" && attempts < 5) {
+    if (job.type === "NETO_SYNC" && attempts < 5 && current?.status === "RUNNING") {
       const delayMs = Math.min(30, 2 ** attempts) * 60_000;
-      await prisma.job.update({
-        where: { id: job.id },
+      await prisma.job.updateMany({
+        where: { id: job.id, status: "RUNNING" },
         data: {
           status: "QUEUED",
           errorMessage: message,

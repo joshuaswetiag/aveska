@@ -40,7 +40,10 @@ function boundedIncludes(text: string, term: string) {
     const index = lower.indexOf(needle, from);
     if (index === -1) return false;
     const before = index === 0 || !/[a-z0-9]/i.test(lower[index - 1] ?? "");
-    const after = index + needle.length >= lower.length || !/[a-z0-9]/i.test(lower[index + needle.length] ?? "");
+    let afterAt = index + needle.length;
+    if (lower.startsWith("'s", afterAt)) afterAt += 2;
+    else if (lower[afterAt] === "s" || lower[afterAt] === "'") afterAt += 1;
+    const after = afterAt >= lower.length || !/[a-z0-9]/i.test(lower[afterAt] ?? "");
     if (before && after) return true;
     from = index + needle.length;
   }
@@ -254,9 +257,10 @@ export function extractVehicle(
   const evidence: string[] = [];
 
   const aliasHit = knowledge.aliases
-    .filter((a) => a.alias && aliasInText(vehiclePart, a.alias))
+    .filter((a) => a.alias && a.alias.trim().length >= 3 && !/^\d+$/.test(a.alias.trim()) && aliasInText(vehiclePart, a.alias))
     .sort((a, b) => b.alias.length - a.alias.length)[0];
 
+  const namedFamily = detectFamily(vehiclePart, null, knowledge.families);
   let make = input.make && !looksLikeProductTitle(input.make) ? normalizeWhitespace(input.make) : null;
   if (make) evidence.push("source:make_field");
   else {
@@ -264,6 +268,20 @@ export function extractVehicle(
     make = detected.make ?? aliasHit?.make ?? null;
     evidence.push(...detected.evidence);
     if (!detected.make && aliasHit?.make) evidence.push("alias:make");
+    if (!make && namedFamily) {
+      const familyDef = knowledge.families.find((family) => family.family.toLowerCase() === namedFamily.toLowerCase());
+      if (familyDef) {
+        make = familyDef.make;
+        evidence.push("family:make");
+      }
+    }
+  }
+  const seriesMap = { ...knowledge.seriesMap };
+  if (namedFamily) {
+    for (const family of knowledge.families) {
+      if (family.family.toLowerCase() !== namedFamily.toLowerCase()) continue;
+      for (const code of family.series) seriesMap[code.toUpperCase()] = { make: family.make, family: family.family };
+    }
   }
 
   const bodyType = input.bodyType
@@ -289,14 +307,14 @@ export function extractVehicle(
     ...Object.keys(knowledge.seriesMap),
     ...(learned?.series.map((s) => s.code.toUpperCase()) ?? []),
   ];
-  const collected = collectSeries(tokens, make, knowledge.seriesMap, learnedSeriesCodes);
+  const collected = collectSeries(tokens, make, seriesMap, learnedSeriesCodes);
   const series = unique(
     [...explicitSeries, ...collected.series, ...(aliasHit?.series ?? [])]
       .map((s) => s.toUpperCase().trim())
       .filter(Boolean)
       .filter((code) => {
         if (engine.engineCode && code === engine.engineCode) return false;
-        const known = knowledge.seriesMap[code];
+        const known = seriesMap[code];
         if (known && make && known.make.toLowerCase() !== make.toLowerCase()) return false;
         return true;
       }),
@@ -315,7 +333,7 @@ export function extractVehicle(
   if (!make && vehicleFamily === "Valiant") make = "Chrysler";
   if (!make && vehicleFamily === "Torana") make = "Holden";
   if (!make && series.length) {
-    const hint = knowledge.seriesMap[series[0]];
+    const hint = seriesMap[series[0]];
     if (hint) {
       make = hint.make;
       vehicleFamily = vehicleFamily ?? hint.family;
@@ -326,7 +344,8 @@ export function extractVehicle(
   const aliases: string[] = [];
   if (make && series.length) {
     aliases.push(`${make} ${series.join("/")}`);
-    aliases.push(series.join("/"));
+    const bare = series.join("/");
+    if (bare.length >= 3 && !/^\d+$/.test(bare)) aliases.push(bare);
     if (vehicleFamily) aliases.push(`${make} ${vehicleFamily} ${series.join("/")}`);
   }
 

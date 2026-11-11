@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import { useMemo, type ComponentProps } from "react";
 import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
 
 export { useParams, useSearchParams } from "react-router-dom";
@@ -13,9 +13,12 @@ export function usePathname() {
 
 export function useRouter() {
   const navigate = useNavigate();
-  return {
-    push: (href: string) => navigate(href),
-    replace: (href: string) => navigate(href, { replace: true }),
-    refresh: () => window.dispatchEvent(new Event("aveska:refresh")),
-  };
+  return useMemo(
+    () => ({
+      push: (href: string) => navigate(href),
+      replace: (href: string) => navigate(href, { replace: true }),
+      refresh: () => window.dispatchEvent(new Event("aveska:refresh")),
+    }),
+    [navigate],
+  );
 }

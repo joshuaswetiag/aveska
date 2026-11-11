@@ -39,11 +39,17 @@ const STRING_ENV_KEYS = [
 function applyEnv(env: Env) {
   bindWorkerDb(env);
   bindWorkerUploads(env.UPLOADS);
-  if (!(globalThis as { aveskaAdminChecked?: boolean }).aveskaAdminChecked) {
-    (globalThis as { aveskaAdminChecked?: boolean }).aveskaAdminChecked = true;
-    void import("@/lib/ensure-admin")
+  const state = globalThis as { aveskaAdminChecked?: boolean; aveskaAdminPromise?: Promise<void> };
+  if (!state.aveskaAdminChecked && !state.aveskaAdminPromise) {
+    state.aveskaAdminPromise = import("@/lib/ensure-admin")
       .then(({ ensureFirstAdmin }) => ensureFirstAdmin())
-      .catch((error) => console.error("Could not create the first admin", error));
+      .then(() => {
+        state.aveskaAdminChecked = true;
+      })
+      .catch((error) => {
+        state.aveskaAdminPromise = undefined;
+        console.error("Could not create the first admin", error);
+      });
   }
   // Object.entries(env) can omit secrets — copy known string bindings explicitly.
   for (const [key, value] of Object.entries(env)) {
@@ -57,6 +63,7 @@ function applyEnv(env: Env) {
 
 async function handleFetch(request: Request, env: Env, ctx: WorkerExecutionContext): Promise<Response> {
   applyEnv(env);
+  await (globalThis as { aveskaAdminPromise?: Promise<void> }).aveskaAdminPromise;
   const url = new URL(request.url);
 
   // Job processing can take many seconds — run in waitUntil so the browser never hangs
@@ -94,6 +101,7 @@ export default {
 
   async scheduled(_controller: WorkerScheduledController, env: Env, ctx: WorkerExecutionContext) {
     applyEnv(env);
+    await (globalThis as { aveskaAdminPromise?: Promise<void> }).aveskaAdminPromise;
     ctx.waitUntil(
       (async () => {
         for (let i = 0; i < 4; i += 1) {

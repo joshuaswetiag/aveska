@@ -1,12 +1,13 @@
 import { prisma } from "@/lib/db";
 import { generatePersonalizedEmail } from "@/lib/ai/provider";
 import { asStringArray } from "@/lib/json-array";
+import { fromCents } from "@/lib/money";
 import { formatCurrency, slugify, withUtm, zonedDayRange, STORE_TIMEZONE } from "@/lib/utils";
 import { loadStockProducts, matchStockForVehicle, vehicleCacheKey, vehicleFromOrderItem } from "@/lib/campaign/match-stock";
 import { resolveProductLink, isStoreHome } from "@/lib/catalogue/product-url";
 import { isEbayMemberEmail } from "@/lib/campaign/send-targets";
 import { isLiveOrderStatus } from "@/lib/catalogue/neto-orders";
-import type { CampaignType } from "@prisma/client";
+import type { CampaignType, RecommendationStatus } from "@prisma/client";
 import type { FitmentProfile } from "@/types";
 
 export type CampaignGenerateInput = {
@@ -20,6 +21,12 @@ export type CampaignGenerateInput = {
   to?: string;
   syncOrders?: boolean;
 };
+
+function chunkIds(ids: string[], size: number) {
+  const chunks: string[][] = [];
+  for (let index = 0; index < ids.length; index += size) chunks.push(ids.slice(index, index + size));
+  return chunks;
+}
 
 export type CampaignGenerateStats = {
   from?: string;
@@ -390,25 +397,33 @@ async function generateFromRecommendations(
 ) {
   const { campaign, settings, slug } = await createCampaignRecord(input);
   await onProgress?.(0, 1, "Loading recommendations");
-  const recommendations = await prisma.recommendation.findMany({
-    where: {
-      status: { in: ["GENERATED", "APPROVED", "EXCELLENT_MATCH"] },
-      customer: {
-        isSuppressed: false,
-        emailNormalized: { not: null },
-        id: input.customerIds ? { in: input.customerIds } : undefined,
-        segments: input.segmentId ? { some: { segmentId: input.segmentId } } : undefined,
-      },
-      vehicleId: input.vehicleId,
-    },
-    include: {
-      customer: true,
-      vehicle: true,
-      product: true,
-      reasons: true,
-    },
-    orderBy: { score: "desc" },
-  });
+  const statuses: RecommendationStatus[] = ["GENERATED", "APPROVED", "EXCELLENT_MATCH"];
+  const idChunks = input.customerIds?.length ? chunkIds(input.customerIds, 90) : [undefined];
+  const recommendations = (
+    await Promise.all(
+      idChunks.map((ids) =>
+        prisma.recommendation.findMany({
+          where: {
+            status: { in: statuses },
+            vehicleId: input.vehicleId,
+            customer: {
+              isSuppressed: false,
+              emailNormalized: { not: null },
+              id: ids ? { in: ids } : undefined,
+              segments: input.segmentId ? { some: { segmentId: input.segmentId } } : undefined,
+            },
+          },
+          include: {
+            customer: true,
+            vehicle: true,
+            product: true,
+            reasons: true,
+          },
+          orderBy: { score: "desc" },
+        }),
+      ),
+    )
+  ).flat();
 
   const suppressed = await prisma.suppression.findMany({ select: { emailNormalized: true } });
   const suppressedSet = new Set(suppressed.map((s) => s.emailNormalized));
@@ -459,7 +474,7 @@ async function generateFromRecommendations(
       return {
         name: rec.product.name,
         url: tracked,
-        price: rec.product.price ? formatCurrency(Number(rec.product.price)) : null,
+        price: rec.product.price ? formatCurrency(fromCents(Number(rec.product.price))) : null,
         imageUrl: rec.product.imageUrl,
         id: rec.product.id,
         recommendationId: rec.id,

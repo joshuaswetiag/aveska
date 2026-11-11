@@ -66,7 +66,7 @@ export const MAKE_ALIASES: Record<string, string[]> = {
   Holden: ["holden", "gmh"],
   Toyota: ["toyota"],
   Chrysler: ["chrysler", "valiant"],
-  Nissan: ["nissan", "datsun"],
+  Nissan: ["nissan"],
   Mazda: ["mazda"],
   Mitsubishi: ["mitsubishi"],
   Honda: ["honda"],

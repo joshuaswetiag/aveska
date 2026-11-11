@@ -57,7 +57,7 @@ export async function getDataQuality(): Promise<{
   cards: QualityCard[];
   totals: { customers: number; orderLines: number; products: number; vehicles: number };
 }> {
-  const [customers, orderLines, products, vehicles, orderItems, missingEmail, customersWithoutVehicle, missingProductName, missingName] =
+  const [customers, orderLines, products, vehicles, orderItems, missingEmail, customersWithoutVehicle, missingProductName] =
     await Promise.all([
       prisma.customer.count(),
       prisma.orderItem.count(),
@@ -69,7 +69,6 @@ export async function getDataQuality(): Promise<{
       countWhereBlank("Customer", "email"),
       prisma.customer.count({ where: { vehicles: { none: {} } } }),
       countWhereBlank("OrderItem", "productName"),
-      countWhereBlank("Customer", "name"),
     ]);
 
   let notProcessed = 0;
@@ -171,7 +170,7 @@ export async function getDataQuality(): Promise<{
     },
     {
       label: "Customers missing email",
-      value: missingEmail + missingName,
+      value: missingEmail,
       total: customers,
       href: "/customers",
       hint: "Cannot be included in campaign export until an email is added.",

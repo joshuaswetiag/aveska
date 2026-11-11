@@ -119,9 +119,8 @@ export async function generateRecommendations(options?: {
 
   for (;;) {
     const customers = await prisma.customer.findMany({
-      where: customerWhere,
+      where: cursor ? { AND: [customerWhere, { id: { gt: cursor } }] } : customerWhere,
       take: 25,
-      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       orderBy: { id: "asc" },
       include: {
         vehicles: { include: { vehicle: true } },
@@ -138,7 +137,11 @@ export async function generateRecommendations(options?: {
     cursor = customers[customers.length - 1].id;
     if (!options?.resume) {
       await prisma.recommendation.deleteMany({
-        where: { customerId: { in: customers.map((row) => row.id) }, status: "GENERATED" },
+        where: {
+          customerId: { in: customers.map((row) => row.id) },
+          campaignProducts: { none: {} },
+          OR: [{ status: "GENERATED" }, { status: "NEEDS_REVIEW", feedbackNote: null }],
+        },
       });
     }
 

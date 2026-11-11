@@ -8,6 +8,8 @@ import { looksLikeProductTitle } from "@/lib/vehicle/dictionary";
 import { normalizeKey, unique } from "@/lib/utils";
 
 export async function loadLearnedKnowledge(): Promise<LearnedVehicleKnowledge> {
+  const cache = globalThis as { aveskaLearned?: { at: number; value: LearnedVehicleKnowledge } };
+  if (cache.aveskaLearned && Date.now() - cache.aveskaLearned.at < 120_000) return cache.aveskaLearned.value;
   const [allProducts, aliases, vehicles] = await Promise.all([
     prisma.product.findMany({
       select: { make: true, model: true, vehicleFamily: true, series: true },
@@ -47,7 +49,7 @@ export async function loadLearnedKnowledge(): Promise<LearnedVehicleKnowledge> {
     }),
   ];
 
-  return {
+  const value = {
     makes,
     families,
     series,
@@ -58,6 +60,8 @@ export async function loadLearnedKnowledge(): Promise<LearnedVehicleKnowledge> {
       series: asStringArray(a.vehicle.series),
     })),
   };
+  cache.aveskaLearned = { at: Date.now(), value };
+  return value;
 }
 
 export async function upsertVehicleFromExtraction(extraction: VehicleExtraction) {

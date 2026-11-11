@@ -71,7 +71,7 @@ export function ImportWizard({ defaultType }: { defaultType: "ORDERS" | "CATALOG
     form.set("file", file);
     form.set("type", type);
     const res = await fetch("/api/imports/upload", { method: "POST", body: form });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     setPending(false);
     if (!res.ok) {
       toast.error(data.error ?? "Upload failed");
@@ -93,7 +93,7 @@ export function ImportWizard({ defaultType }: { defaultType: "ORDERS" | "CATALOG
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mapping, start: true }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     setPending(false);
     if (!res.ok) {
       toast.error(data.error ?? "Import could not start");

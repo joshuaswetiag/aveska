@@ -10,7 +10,6 @@ import {
   normalizeKey,
   normalizeWhitespace,
   parseInteger,
-  parseNumber,
   parseNetoDateTime,
   toNetoUtcStamp,
   zonedDayRange,
@@ -98,6 +97,7 @@ export type NetoOrderSyncOptions = {
   timeBudgetMs?: number;
   importedSoFar?: number;
   skipBackfill?: boolean;
+  pass?: "placed" | "updated";
   onPage?: (info: { nextPage: number; imported: number }) => Promise<void>;
 };
 
@@ -207,11 +207,10 @@ export async function syncNetoOrders(
   let nextPage = options?.startPage ?? 0;
   const seen = new Set<string>();
 
-  // Chunked runs use a single placed-date pass starting at startPage.
-  const activePasses =
-    options?.startPage != null || options?.timeBudgetMs != null || options?.maxPages != null
-      ? [passes[0]]
-      : passes;
+  const chunked = options?.startPage != null || options?.timeBudgetMs != null || options?.maxPages != null;
+  const selected =
+    options?.pass === "updated" ? passes.find((pass) => pass.label.startsWith("updated")) ?? null : passes[0];
+  const activePasses = chunked ? (selected ? [selected] : []) : passes;
 
   for (const pass of activePasses) {
     let page = options?.startPage ?? 0;

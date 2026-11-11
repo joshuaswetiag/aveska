@@ -17,8 +17,12 @@ export type SessionUser = {
 
 function secret() {
   const value = process.env.AUTH_SECRET?.trim();
-  if (value && value !== "dev-only-change-this-to-a-long-random-string") return value;
-  if (process.env.NODE_ENV === "production" || process.env.AVESKA_RUNTIME === "worker") {
+  const production = process.env.NODE_ENV === "production" || process.env.AVESKA_RUNTIME === "worker";
+  if (value && value !== "dev-only-change-this-to-a-long-random-string") {
+    if (production && value.length < 32) throw new Error("AUTH_SECRET must be at least 32 characters");
+    return value;
+  }
+  if (production) {
     throw new Error("AUTH_SECRET is not set");
   }
   return "dev-only-change-this-to-a-long-random-string";
@@ -87,24 +91,70 @@ export async function requireRole(roles: Role[]) {
 
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 
+function loginKey(email: string, request: Request) {
+  const ip =
+    request.headers.get("cf-connecting-ip") ||
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    "local";
+  return `login:${email}|${ip}`.slice(0, 180);
+}
+
+async function readLoginAttempt(key: string) {
+  const memory = loginAttempts.get(key) ?? null;
+  try {
+    const rows = await prisma.$queryRaw<Array<{ value: string }>>`SELECT "value" FROM "_aveska_meta" WHERE "key" = ${key}`;
+    const stored = rows[0]?.value;
+    if (!stored) return memory;
+    const [count, resetAt] = stored.split("|");
+    const parsed = { count: Number(count) || 0, resetAt: Number(resetAt) || 0 };
+    if (!memory || parsed.count >= memory.count) return parsed;
+    return memory;
+  } catch {
+    return memory;
+  }
+}
+
+async function writeLoginAttempt(key: string, count: number, resetAt: number) {
+  loginAttempts.set(key, { count, resetAt });
+  try {
+    const value = `${count}|${resetAt}`;
+    await prisma.$executeRaw`
+      INSERT INTO "_aveska_meta" ("key", "value") VALUES (${key}, ${value})
+      ON CONFLICT("key") DO UPDATE SET "value" = ${value}
+    `;
+  } catch {
+    // The bookkeeping table appears when migration 0002 has been applied.
+  }
+}
+
+async function clearLoginAttempt(key: string) {
+  loginAttempts.delete(key);
+  try {
+    await prisma.$executeRaw`DELETE FROM "_aveska_meta" WHERE "key" = ${key}`;
+  } catch {
+    // ignored when the table is not there yet
+  }
+}
+
 export async function login(request: Request) {
   const body = (await request.json().catch(() => ({}))) as { email?: string; password?: string };
   const email = String(body.email ?? "").trim().toLowerCase();
   const password = String(body.password ?? "");
   if (!email || !password) return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
   const now = Date.now();
-  const attempt = loginAttempts.get(email);
+  const key = loginKey(email, request);
+  const attempt = await readLoginAttempt(key);
   if (attempt && attempt.resetAt > now && attempt.count >= 8) {
     return NextResponse.json({ error: "Too many login attempts. Try again in a few minutes." }, { status: 429 });
   }
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user || !(await compare(password, user.passwordHash))) {
-    const current = loginAttempts.get(email);
-    const resetAt = current && current.resetAt > now ? current.resetAt : now + 10 * 60 * 1000;
-    loginAttempts.set(email, { count: (current && current.resetAt > now ? current.count : 0) + 1, resetAt });
+    const resetAt = attempt && attempt.resetAt > now ? attempt.resetAt : now + 10 * 60 * 1000;
+    const count = attempt && attempt.resetAt > now ? attempt.count + 1 : 1;
+    await writeLoginAttempt(key, count, resetAt);
     return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
   }
-  loginAttempts.delete(email);
+  await clearLoginAttempt(key);
   const created = await prisma.session.create({
     data: { userId: user.id, expiresAt: new Date(Date.now() + MAX_AGE * 1000) },
   });

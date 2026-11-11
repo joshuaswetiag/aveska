@@ -34,24 +34,13 @@ async function dashboard() {
       prisma.customer.count({
         where: { isSuppressed: false, recommendations: { some: { status: { in: ["GENERATED", "APPROVED"] } } } },
       }),
-      (async () => {
-        const dates: Array<{ orderDate: Date | null }> = [];
-        let cursor: string | undefined;
-        for (;;) {
-          const page = await prisma.order.findMany({
-            where: { orderDate: { not: null } },
-            select: { id: true, orderDate: true },
-            orderBy: { id: "asc" },
-            take: 500,
-            ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-          });
-          if (!page.length) break;
-          dates.push(...page);
-          cursor = page[page.length - 1].id;
-          if (page.length < 500) break;
-        }
-        return dates;
-      })(),
+      prisma.$queryRaw<Array<{ month: string; count: number | bigint }>>`
+        SELECT substr("orderDate", 1, 7) AS month, COUNT(*) AS count
+        FROM "Order"
+        WHERE "orderDate" IS NOT NULL
+        GROUP BY substr("orderDate", 1, 7)
+        ORDER BY month
+      `,
       prisma.vehicle.findMany({
         include: { _count: { select: { customerVehicles: true } } },
         orderBy: { customerVehicles: { _count: "desc" } },
@@ -61,10 +50,9 @@ async function dashboard() {
     ]);
 
   const byMonth: Record<string, number> = {};
-  for (const order of monthly) {
-    if (!order.orderDate) continue;
-    const key = `${order.orderDate.getFullYear()}-${String(order.orderDate.getMonth() + 1).padStart(2, "0")}`;
-    byMonth[key] = (byMonth[key] ?? 0) + 1;
+  for (const row of monthly) {
+    if (!row.month) continue;
+    byMonth[row.month] = Number(row.count);
   }
 
   return {
@@ -94,10 +82,15 @@ async function customers(url: URL) {
     orderBy: { lastPurchaseAt: "desc" },
     take: 100,
   });
+  const session = await auth();
+  if (session?.user.role === "READONLY") {
+    for (const row of rows) row.phone = null;
+  }
   return prepareClient({ q, customers: rows });
 }
 
 async function customer(id: string) {
+  const session = await auth();
   const row = await prisma.customer.findUnique({
     where: { id },
     include: {
@@ -108,6 +101,7 @@ async function customer(id: string) {
       campaignRecipients: { include: { campaign: true } },
     },
   });
+  if (row && session?.user.role === "READONLY") row.phone = null;
   return row ? prepareClient(row) : row;
 }
 
@@ -349,6 +343,7 @@ async function settings() {
       shopUrl: stored.shopUrl ?? "",
       contactUrl: stored.contactUrl ?? "",
       companyName: stored.companyName,
+      postalAddress: stored.postalAddress ?? "",
       trackingUrl,
       reduceScoreSameFamily: stored.reduceScoreSameFamily,
     },

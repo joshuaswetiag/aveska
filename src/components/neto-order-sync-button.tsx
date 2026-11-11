@@ -47,7 +47,7 @@ export function NetoOrderSyncForm({ label = "Sync orders" }: { label?: string })
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ from, to }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     setPending(false);
     if (!res.ok) {
       toast.error(data.error ?? "Order sync could not start");

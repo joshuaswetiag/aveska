@@ -1,17 +1,27 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "@/lib/router";
 
 export function JobPoller({ id, status }: { id: string; status: string }) {
   const router = useRouter();
+  const kicked = useRef<string | null>(null);
   useEffect(() => {
     if (status === "COMPLETED" || status === "FAILED" || status === "CANCELLED") return;
-    if (status === "QUEUED") {
+    const kick = () => {
+      if (status !== "QUEUED") return;
       void fetch(`/api/jobs/${id}/process`, { method: "POST" }).catch(() => undefined);
+    };
+    if (kicked.current !== id) {
+      kicked.current = id;
+      kick();
     }
-    const timer = setInterval(() => router.refresh(), 1500);
-    return () => clearInterval(timer);
+    const refreshTimer = setInterval(() => router.refresh(), 1500);
+    const continueTimer = setInterval(kick, 15000);
+    return () => {
+      clearInterval(refreshTimer);
+      clearInterval(continueTimer);
+    };
   }, [id, status, router]);
   return null;
 }

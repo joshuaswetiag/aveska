@@ -1,7 +1,7 @@
 "use client";
 
 import { Link } from "@/lib/router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { usePathname } from "@/lib/router";
 import {
   Car,
@@ -87,11 +87,8 @@ export function AppShell({
   signOutSlot: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const [mobileOpen, setMobileOpen] = useState(false);
-
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [pathname]);
+  const [menuPath, setMenuPath] = useState<string | null>(null);
+  const mobileOpen = menuPath === pathname;
 
   return (
     <div className="flex min-h-screen">
@@ -111,15 +108,15 @@ export function AppShell({
 
       {mobileOpen ? (
         <div className="fixed inset-0 z-40 md:hidden">
-          <button type="button" className="absolute inset-0 bg-[#0b3d46]/45 backdrop-blur-sm" onClick={() => setMobileOpen(false)} aria-label="Close menu" />
+          <button type="button" className="absolute inset-0 bg-[#0b3d46]/45 backdrop-blur-sm" onClick={() => setMenuPath(null)} aria-label="Close menu" />
           <aside className="relative flex h-full w-72 flex-col overflow-hidden bg-gradient-to-b from-[#0f5b66] via-sidebar to-[#0b3d46] text-sidebar-foreground shadow-2xl">
             <div className="flex items-center justify-between px-5 py-6">
               <Brand />
-              <button type="button" onClick={() => setMobileOpen(false)} className="rounded-lg p-1.5 text-white/80 hover:bg-white/10">
+              <button type="button" onClick={() => setMenuPath(null)} className="rounded-lg p-1.5 text-white/80 hover:bg-white/10">
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <NavLinks pathname={pathname} onNavigate={() => setMobileOpen(false)} />
+            <NavLinks pathname={pathname} onNavigate={() => setMenuPath(null)} />
             <div className="border-t border-white/10 p-4 text-xs text-sidebar-muted">
               <div className="text-sm text-sidebar-foreground">{user.name}</div>
               <div className="mt-3">{signOutSlot}</div>
@@ -133,7 +130,7 @@ export function AppShell({
           <button
             type="button"
             className="rounded-lg p-2 text-primary transition-colors hover:bg-primary/10 md:hidden"
-            onClick={() => setMobileOpen(true)}
+            onClick={() => setMenuPath(pathname)}
             aria-label="Open menu"
           >
             <Menu className="h-5 w-5" />

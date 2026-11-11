@@ -75,7 +75,6 @@ export class ResendEmailProvider implements EmailProvider {
       method: "POST",
       headers: {
         ...(payload.idempotencyKey ? { "Idempotency-Key": payload.idempotencyKey } : {}),
-        ...(payload.listUnsubscribe ? { "List-Unsubscribe": `<${payload.listUnsubscribe}>` } : {}),
       },
       body: JSON.stringify({
         from: payload.from || formatFromHeader(config),
@@ -84,6 +83,12 @@ export class ResendEmailProvider implements EmailProvider {
         html: outbound.html,
         text: htmlToText(outbound.html),
         reply_to: config.replyTo || undefined,
+        headers: payload.listUnsubscribe
+          ? {
+              "List-Unsubscribe": `<${payload.listUnsubscribe}>`,
+              "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            }
+          : undefined,
         attachments: logo
           ? [
               {

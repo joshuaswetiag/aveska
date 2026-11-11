@@ -15,7 +15,7 @@ export function NetoSyncButton() {
       onClick={async () => {
         setPending(true);
         const res = await fetch("/api/catalogue/neto-sync", { method: "POST" });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         setPending(false);
         if (!res.ok) {
           toast.error(data.error ?? "Live sync could not start");

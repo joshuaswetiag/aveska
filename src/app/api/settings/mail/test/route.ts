@@ -26,7 +26,12 @@ export async function POST(request: Request) {
       smtpPort: body.smtpPort != null && String(body.smtpPort) !== "" ? Number(body.smtpPort) : saved?.smtpPort,
       smtpSecure: body.smtpSecure == null ? saved?.smtpSecure : Boolean(body.smtpSecure),
       smtpUser: asText(body.smtpUser) ?? saved?.smtpUser,
-      smtpPassword: asText(body.smtpPassword) ?? saved?.smtpPassword,
+      smtpPassword:
+        asText(body.smtpPassword) ??
+        ((asText(body.smtpHost) && asText(body.smtpHost) !== saved?.smtpHost) ||
+        (asText(body.smtpUser) && asText(body.smtpUser) !== saved?.smtpUser)
+          ? null
+          : saved?.smtpPassword),
       maropostAccountId: asText(body.maropostAccountId) ?? saved?.maropostAccountId,
       maropostApiKey: asText(body.maropostApiKey) ?? saved?.maropostApiKey,
       maropostCampaignName: asText(body.maropostCampaignName) ?? saved?.maropostCampaignName,

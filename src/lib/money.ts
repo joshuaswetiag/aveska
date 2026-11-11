@@ -2,7 +2,8 @@
 
 export function toCents(value: number | string | null | undefined): number | null {
   if (value == null || value === "") return null;
-  const num = typeof value === "number" ? value : Number(value);
+  const num =
+    typeof value === "number" ? value : Number(String(value).replace(/[^0-9.-]/g, ""));
   if (!Number.isFinite(num)) return null;
   return Math.round(num * 100);
 }
@@ -40,6 +41,7 @@ export function presentMoney(value: unknown): void {
   const record = value as Record<string, unknown>;
   for (const [key, child] of Object.entries(record)) {
     if (MONEY_KEYS.has(key) && child != null) {
+      if (typeof child === "string" && /[^0-9.\-]/.test(child.trim())) continue;
       const numeric = typeof child === "object" ? Number(child) : child;
       record[key] = fromCents(numeric as number | string);
       continue;

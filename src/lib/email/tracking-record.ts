@@ -110,31 +110,24 @@ export async function recordCampaignTraffic(input: {
       label,
     },
   });
-  if (input.type === "CLICK") {
-    await prisma.campaignRecipient.update({
-      where: { id: recipient.id },
-      data: {
-        opened: true,
-        clicked: true,
-        openedAt: recipient.opened ? undefined : now,
-        clickedAt: recipient.clicked ? undefined : now,
-      },
-    });
+  const opened = await prisma.campaignRecipient.updateMany({
+    where: { id: recipient.id, opened: false },
+    data: { opened: true, openedAt: now },
+  });
+  const clicked =
+    input.type === "CLICK"
+      ? await prisma.campaignRecipient.updateMany({
+          where: { id: recipient.id, clicked: false },
+          data: { clicked: true, clickedAt: now },
+        })
+      : { count: 0 };
+  if (opened.count || clicked.count) {
     await prisma.campaign.update({
       where: { id: recipient.campaignId },
       data: {
-        clicked: recipient.clicked ? undefined : { increment: 1 },
-        opened: recipient.opened ? undefined : { increment: 1 },
+        ...(opened.count ? { opened: { increment: 1 } } : {}),
+        ...(clicked.count ? { clicked: { increment: 1 } } : {}),
       },
-    });
-  } else if (!recipient.opened) {
-    await prisma.campaignRecipient.update({
-      where: { id: recipient.id },
-      data: { opened: true, openedAt: now },
-    });
-    await prisma.campaign.update({
-      where: { id: recipient.campaignId },
-      data: { opened: { increment: 1 } },
     });
   }
   return recipient;

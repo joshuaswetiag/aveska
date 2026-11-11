@@ -1,7 +1,6 @@
 import { NextResponse } from "@/server/next-response";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
-import { processNextJob } from "@/lib/jobs/queue";
 import { startJobWorker } from "@/lib/jobs/worker";
 import { FULL_SYNC_FROM, ensureFullSyncQueued, listFullSyncJobs } from "@/lib/catalogue/full-sync";
 import { fromCents } from "@/lib/money";
@@ -67,6 +66,19 @@ export async function GET() {
     const netoConfigured = Boolean(process.env.NETO_API_KEY?.trim()) || stats.products > 0;
     let job = null as Awaited<ReturnType<typeof ensureFullSyncQueued>>;
     let enqueueError = "";
+    if (!process.env.NETO_API_KEY?.trim() && stats.products === 0 && stats.orders === 0) {
+      return json({
+        ready: true,
+        netoConfigured: false,
+        needsSync: false,
+        enqueueError: "Add a Neto API key or import a catalogue CSV.",
+        workerStarted: Boolean(globalThis.aveskaJobWorkerStarted),
+        job: null,
+        counts: stats,
+        from: FULL_SYNC_FROM,
+        to: storeIsoDate(),
+      });
+    }
     if (!process.env.NETO_API_KEY?.trim() && stats.products === 0) {
       enqueueError = "NETO_API_KEY is not set on this running app.";
     } else if (!process.env.NETO_API_KEY?.trim() && stats.products > 0) {

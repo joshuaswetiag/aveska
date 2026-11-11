@@ -22,6 +22,7 @@ export type FullSyncPayload = {
   recommendationCursor?: string | null;
   productPage?: number;
   orderPage?: number;
+  orderPass?: "placed" | "updated";
   fitmentCursor?: string | null;
   linkCursor?: string | null;
   importedProducts?: number;
@@ -63,35 +64,20 @@ export async function syncFullAveskaStore(
 ) {
   const to = storeIsoDate();
   const from = FULL_SYNC_FROM;
-  const [productCount, orderCount] = await Promise.all([prisma.product.count(), prisma.order.count()]);
+  void options;
 
-  let catalogue: unknown = { skipped: true, imported: productCount };
-  if (options?.refreshNeto || productCount < 1000) {
-    await onProgress?.(1, 100, "Syncing live Aveska products…");
-    catalogue = await scaled(1, 34, onProgress, (progress) =>
-      syncNetoCatalogue(progress, { extractVehicles: false }),
-    );
-  } else {
-    await onProgress?.(35, 100, `Using ${productCount.toLocaleString()} products already synced`);
-  }
+  await onProgress?.(1, 100, "Syncing live Aveska products…");
+  const catalogue = await scaled(1, 34, onProgress, (progress) =>
+    syncNetoCatalogue(progress, { extractVehicles: false }),
+  );
 
-  let orders: unknown = { skipped: true, imported: orderCount };
-  if (options?.refreshNeto || orderCount < 1000) {
-    await onProgress?.(36, 100, "Syncing customers, orders, and revenue…");
-    orders = await scaled(36, 40, onProgress, (progress) => syncNetoOrders(progress, { from, to }));
-  } else {
-    await onProgress?.(76, 100, `Using ${orderCount.toLocaleString()} orders already synced`);
-  }
+  await onProgress?.(36, 100, "Syncing customers, orders, and revenue…");
+  const orders = await scaled(36, 40, onProgress, (progress) => syncNetoOrders(progress, { from, to }));
 
-  const vehicleCount = await prisma.vehicle.count();
-  if (vehicleCount < 3500) {
-    await onProgress?.(77, 100, "Matching vehicles from every product…");
-    await extractCatalogueFitments(async (done, total) => {
-      await onProgress?.(77 + Math.round((done / Math.max(total, 1)) * 11), 100, "Matching vehicles from every product…");
-    });
-  } else {
-    await onProgress?.(88, 100, "Product vehicles already matched");
-  }
+  await onProgress?.(77, 100, "Matching vehicles from every product…");
+  await extractCatalogueFitments(async (done, total) => {
+    await onProgress?.(77 + Math.round((done / Math.max(total, 1)) * 11), 100, "Matching vehicles from every product…");
+  });
 
   await onProgress?.(88, 100, "Matching extra vehicles from orders…");
   await harvestVehiclesFromOrderLines(async (done, total, message) => {
@@ -182,6 +168,7 @@ export async function advanceFullSync(
         {
           from,
           to,
+          pass: state.orderPass ?? "placed",
           startPage: state.orderPage ?? 0,
           timeBudgetMs: remaining(),
           importedSoFar: state.importedOrders ?? 0,
@@ -197,6 +184,11 @@ export async function advanceFullSync(
       state.importedOrders = chunk.imported;
       state.orderPage = chunk.nextPage;
       if (!chunk.done) {
+        return { done: false, payload: state, result: chunk };
+      }
+      if ((state.orderPass ?? "placed") === "placed" && process.env.NETO_ORDERS_INCLUDE_UPDATED !== "0") {
+        state.orderPass = "updated";
+        state.orderPage = 0;
         return { done: false, payload: state, result: chunk };
       }
       state.phase = "vehicles";

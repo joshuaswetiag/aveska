@@ -7,6 +7,7 @@ import { resolveTrackingBaseUrl } from "@/lib/email/tracking-record";
 import { loadMailSettings } from "@/lib/email/settings-store";
 import { getEmailTransport } from "@/lib/email/smtp";
 import { eligibleRecipients } from "@/lib/campaign/send-targets";
+import { unsubscribeUrl } from "@/lib/campaign/unsubscribe-token";
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -62,8 +63,9 @@ export async function sendCampaign(
     if (!sample?.bodyHtml && !campaign.bodyHtml) throw new Error("This campaign has no email HTML to send.");
     const html = wrapEmailHtmlForTracking(
       restyleCampaignHtml(sample?.bodyHtml || campaign.bodyHtml || ""),
-      sample?.id || campaign.id,
+      "test",
       trackingBase ?? "",
+      { companyName: settings?.companyName, postalAddress: settings?.postalAddress },
     );
     const transport = await getEmailTransport();
     await options.onProgress?.(0, 1, connectingMessage(config.provider, config.host, config.port));
@@ -72,19 +74,33 @@ export async function sendCampaign(
       subject: `[TEST] ${sample?.subject || campaign.subject || campaign.name}`,
       html,
       from: formatFromHeader(config),
+      listUnsubscribe: trackingBase ? `${trackingBase.replace(/\/$/, "")}/t/test/unsubscribe` : undefined,
     });
     await options.onProgress?.(1, 1, `Test sent to ${options.testTo}`);
     return { test: true, campaignId, to: options.testTo, sent: 1, failed: 0, skipped: 0, remaining: 0 };
   }
 
   const recipients = await prisma.campaignRecipient.findMany({
-    where: { campaignId },
-    include: { customer: true },
+    where: { campaignId, sent: false },
+    select: {
+      id: true,
+      sent: true,
+      sendError: true,
+      subject: true,
+      customerId: true,
+      customer: { select: { email: true, emailNormalized: true, isSuppressed: true } },
+    },
     orderBy: { createdAt: "asc" },
   });
-  const suppressed = new Set(
-    (await prisma.suppression.findMany({ select: { emailNormalized: true } })).map((row) => row.emailNormalized),
-  );
+  const emails = [...new Set(recipients.map((row) => row.customer.emailNormalized).filter((email): email is string => Boolean(email)))];
+  const suppressed = new Set<string>();
+  for (let index = 0; index < emails.length; index += 90) {
+    const rows = await prisma.suppression.findMany({
+      where: { emailNormalized: { in: emails.slice(index, index + 90) } },
+      select: { emailNormalized: true },
+    });
+    for (const row of rows) suppressed.add(row.emailNormalized);
+  }
   const candidates = eligibleRecipients(
     recipients.map((row) => ({
       id: row.id,
@@ -92,7 +108,6 @@ export async function sendCampaign(
       emailNormalized: row.customer.emailNormalized,
       isSuppressed: row.customer.isSuppressed,
       sent: row.sent,
-      bodyHtml: row.bodyHtml,
       subject: row.subject,
     })),
     suppressed,
@@ -120,22 +135,50 @@ export async function sendCampaign(
     for (const [index, candidate] of candidates.entries()) {
       const recipient = recipients.find((row) => row.id === candidate.id);
       const to = recipient?.customer.emailNormalized || normalizeEmail(recipient?.customer.email);
-      const html = wrapEmailHtmlForTracking(
-        restyleCampaignHtml(recipient?.bodyHtml || campaign.bodyHtml || ""),
-        recipient?.id || campaignId,
-        trackingBase ?? "",
-      );
       const subject = recipient?.subject || campaign.subject || campaign.name;
       await options?.onProgress?.(index, candidates.length, `Sending ${index + 1} / ${candidates.length}`);
-      if (!recipient || !to || !html) {
+      if (!recipient || !to) {
         failed += 1;
         continue;
       }
+      const frequencyDays = settings?.campaignFrequencyDays ?? 30;
+      if (frequencyDays > 0) {
+        const prior = await prisma.campaignRecipient.findFirst({
+          where: {
+            customerId: recipient.customerId,
+            sent: true,
+            sentAt: { gte: new Date(Date.now() - frequencyDays * 86_400_000) },
+            id: { not: recipient.id },
+          },
+          select: { id: true },
+        });
+        if (prior) {
+          await prisma.campaignRecipient.update({
+            where: { id: recipient.id },
+            data: { sendError: "Skipped: emailed inside the frequency window" },
+          });
+          continue;
+        }
+      }
       const current = await prisma.campaignRecipient.findUnique({
         where: { id: recipient.id },
-        select: { sent: true, sendError: true },
+        select: { sent: true, sendError: true, bodyHtml: true },
       });
       if (!current || current.sent) continue;
+      if (current.sendError?.startsWith("SENT:")) {
+        await prisma.campaignRecipient.update({
+          where: { id: recipient.id },
+          data: {
+            sent: true,
+            sentAt: new Date(),
+            sendError: null,
+            providerMessageId: current.sendError.slice(5),
+            delivered: true,
+          },
+        });
+        sent += 1;
+        continue;
+      }
       if (current.sendError?.startsWith("CLAIM:")) {
         const at = Number(current.sendError.slice(6));
         if (Number.isFinite(at) && Date.now() - at < 90_000) continue;
@@ -145,23 +188,22 @@ export async function sendCampaign(
         data: { sendError: `CLAIM:${Date.now()}` },
       });
       if (claim.count === 0) continue;
-      const listUnsubscribe = trackingBase
-        ? `${trackingBase.replace(/\/$/, "")}/t/${encodeURIComponent(recipient.id)}/unsubscribe`
-        : undefined;
+      const body = restyleCampaignHtml(current.bodyHtml || campaign.bodyHtml || "");
+      const trackedHtml = wrapEmailHtmlForTracking(body, recipient.id, trackingBase ?? "", {
+        companyName: settings?.companyName,
+        postalAddress: settings?.postalAddress,
+      });
+      const listUnsubscribe = trackingBase ? unsubscribeUrl(trackingBase, recipient.id) : undefined;
+      let result: { id: string };
       try {
-        const result = await transport.send({
+        result = await transport.send({
           to,
           subject,
-          html,
+          html: trackedHtml,
           from,
           idempotencyKey: `aveska-${recipient.id}`,
           listUnsubscribe,
         });
-        await prisma.campaignRecipient.update({
-          where: { id: recipient.id },
-          data: { sent: true, sentAt: new Date(), sendError: null, providerMessageId: result.id, delivered: true },
-        });
-        sent += 1;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Send failed";
         failed += 1;
@@ -170,6 +212,23 @@ export async function sendCampaign(
           where: { id: recipient.id },
           data: { sendError: message.slice(0, 500) },
         });
+        if (config.delayMs) await sleep(config.delayMs);
+        continue;
+      }
+      try {
+        await prisma.campaignRecipient.update({
+          where: { id: recipient.id },
+          data: { sent: true, sentAt: new Date(), sendError: null, providerMessageId: result.id, delivered: true },
+        });
+        sent += 1;
+      } catch (error) {
+        console.error("Email was accepted but the recipient could not be marked sent", error);
+        await prisma.campaignRecipient
+          .update({
+            where: { id: recipient.id },
+            data: { sendError: `SENT:${result.id}`.slice(0, 500) },
+          })
+          .catch(() => undefined);
       }
       if (config.delayMs) await sleep(config.delayMs);
       const onWorker = process.env.AVESKA_RUNTIME === "worker";
@@ -187,7 +246,7 @@ export async function sendCampaign(
           isSuppressed: false,
           NOT: { emailNormalized: { endsWith: "@members.ebay.com" } },
         },
-        OR: [{ sendError: null }, { sendError: { startsWith: "CLAIM:" } }],
+        OR: [{ sendError: null }, { sendError: { startsWith: "CLAIM:" } }, { sendError: { startsWith: "SENT:" } }],
       },
     });
     const sentCount = await prisma.campaignRecipient.count({ where: { campaignId, sent: true } });

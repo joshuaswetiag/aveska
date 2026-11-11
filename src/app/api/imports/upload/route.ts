@@ -18,7 +18,19 @@ export async function POST(request: Request) {
   const form = await request.formData();
   const file = form.get("file");
   const type = String(form.get("type") ?? "ORDERS") as ImportType;
+  if (!["ORDERS", "CATALOGUE", "SUPPRESSION", "VEHICLE_ALIASES"].includes(type)) {
+    return NextResponse.json({ error: "Unknown import type" }, { status: 400 });
+  }
   if (!(file instanceof File)) return NextResponse.json({ error: "File is required" }, { status: 400 });
+  const recent = await prisma.importJob.findFirst({
+    where: {
+      fileName: file.name,
+      status: { in: ["PENDING", "VALIDATING", "MAPPING", "PROCESSING"] },
+      createdAt: { gt: new Date(Date.now() - 8_000) },
+    },
+    select: { id: true },
+  });
+  if (recent) return NextResponse.json({ error: "That file is already importing" }, { status: 409 });
 
   const ext = path.extname(file.name).toLowerCase();
   if (!ALLOWED.includes(ext)) {

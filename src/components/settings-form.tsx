@@ -17,6 +17,7 @@ type SettingsShape = {
   shopUrl: string;
   contactUrl: string;
   companyName: string;
+  postalAddress: string;
   trackingUrl: string;
   reduceScoreSameFamily: boolean;
 };
@@ -51,6 +52,7 @@ export function SettingsForm({ settings }: { settings: SettingsShape }) {
                 shopUrl: form.get("shopUrl"),
                 contactUrl: form.get("contactUrl"),
                 companyName: form.get("companyName"),
+                postalAddress: form.get("postalAddress"),
                 trackingUrl: form.get("trackingUrl"),
               }),
             });
@@ -77,6 +79,12 @@ export function SettingsForm({ settings }: { settings: SettingsShape }) {
           <Input name="shopUrl" defaultValue={settings.shopUrl} placeholder="Shop URL" />
           <Input name="contactUrl" defaultValue={settings.contactUrl} placeholder="Contact URL" />
           <Input name="companyName" defaultValue={settings.companyName} placeholder="Company name" className="md:col-span-2" />
+          <Input
+            name="postalAddress"
+            defaultValue={settings.postalAddress}
+            placeholder="Postal address shown in every marketing email"
+            className="md:col-span-2"
+          />
           <div className="md:col-span-2">
             <Label htmlFor="trackingUrl">Public app URL for email click tracking</Label>
             <Input

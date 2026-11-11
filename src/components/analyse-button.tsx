@@ -14,7 +14,7 @@ export function AnalyseButton() {
       onClick={async () => {
         setPending(true);
         const res = await fetch("/api/analyse", { method: "POST" });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         setPending(false);
         if (!res.ok) {
           toast.error(data.error ?? "Analyse failed");
@@ -39,7 +39,7 @@ export function DemoButton() {
       onClick={async () => {
         setPending(true);
         const res = await fetch("/api/demo", { method: "POST" });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         setPending(false);
         if (!res.ok) {
           toast.error(data.error ?? "Demo failed");

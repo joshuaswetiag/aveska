@@ -64,6 +64,7 @@ export type ColumnField =
   | "product_name"
   | "quantity"
   | "unit_price"
+  | "line_total"
   | "order_total"
   | "product_url"
   | "category"

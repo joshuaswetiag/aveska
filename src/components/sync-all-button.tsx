@@ -17,7 +17,7 @@ export function SyncAllButton() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ force: true }),
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         setPending(false);
         if (!res.ok) {
           toast.error(data.error ?? "Could not start a full Aveska sync");

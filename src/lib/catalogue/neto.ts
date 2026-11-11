@@ -138,6 +138,7 @@ export async function netoRequest<T>(action: string, body: object): Promise<Neto
     method: "POST",
     headers,
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(20_000),
   });
   const text = await response.text();
   let json: NetoResponse<T> & { Error?: unknown };
@@ -151,6 +152,11 @@ export async function netoRequest<T>(action: string, body: object): Promise<Neto
     throw new Error(`Neto ${action} failed: ${message}`);
   }
   return json;
+}
+
+export async function countNetoProducts() {
+  const page = await fetchNetoProductPage(0, 1);
+  return { total: page.totalRecords };
 }
 
 export async function fetchNetoProductPage(page: number, pageSize = 100) {

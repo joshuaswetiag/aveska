@@ -30,7 +30,7 @@ export function GenerateCampaignButton({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ customerId, vehicleId, segmentId, name }),
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         setPending(false);
         if (!res.ok) {
           toast.error(data.error ?? "Could not generate campaign");

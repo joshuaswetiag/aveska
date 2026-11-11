@@ -75,7 +75,7 @@ async function smtpOptions(stored: StoredMailSettings | null): Promise<SMTPTrans
     host,
     port: config.port,
     secure: config.secure,
-    requireTLS: !config.secure && (config.port === 587 || config.port === 2525),
+    requireTLS: !config.secure,
     auth: config.user ? { user: config.user, pass: getMailPassword(stored) } : undefined,
     connectionTimeout: 15_000,
     greetingTimeout: 15_000,
@@ -132,7 +132,12 @@ export class SmtpEmailProvider implements EmailProvider {
         replyTo: config.replyTo || undefined,
         headers: {
           ...this.extraHeaders(payload.subject),
-          ...(payload.listUnsubscribe ? { "List-Unsubscribe": `<${payload.listUnsubscribe}>` } : {}),
+          ...(payload.listUnsubscribe
+            ? {
+                "List-Unsubscribe": `<${payload.listUnsubscribe}>`,
+                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+              }
+            : {}),
         },
       });
       return { id: String(info.messageId || info.response || `smtp-${Date.now()}`) };

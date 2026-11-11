@@ -77,7 +77,7 @@ export function CampaignBuilder({
                 vehicleId: form.get("vehicleId") || undefined,
               }),
             });
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
             setPending(false);
             if (!res.ok) {
               toast.error(data.error ?? "Could not create campaign");

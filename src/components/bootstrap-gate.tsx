@@ -67,7 +67,7 @@ function stepState(progress: number, index: number, running: boolean) {
 export function BootstrapGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const started = useRef(false);
-  const processing = useRef(false);
+  const processing = useRef<string | false>(false);
   const [status, setStatus] = useState<BootstrapStatus | null>(null);
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(true);
@@ -124,14 +124,8 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
       setError(data.enqueueError ?? "");
       setChecking(false);
       const jobId = data.job?.id;
-      if (jobId && (data.job?.status === "QUEUED" || data.job?.status === "RUNNING") && !processing.current) {
-        processing.current = true;
-        // Worker returns 202 immediately (work continues in waitUntil).
-        void fetch(`/api/jobs/${jobId}/process`, { method: "POST", cache: "no-store" })
-          .catch(() => undefined)
-          .finally(() => {
-            processing.current = false;
-          });
+      if (jobId && data.job?.status === "QUEUED") {
+        void fetch(`/api/jobs/${jobId}/process`, { method: "POST", cache: "no-store" }).catch(() => undefined);
       }
       return data;
     } catch (err) {

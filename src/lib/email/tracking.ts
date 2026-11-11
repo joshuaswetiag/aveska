@@ -1,3 +1,5 @@
+import { unsubscribeUrl } from "@/lib/campaign/unsubscribe-token";
+
 function normalizeOrigin(url: string | null | undefined) {
   return url?.trim().replace(/\/$/, "") || "";
 }
@@ -142,7 +144,20 @@ export function unwrapTrackingLinks(html: string) {
   );
 }
 
-export function wrapEmailHtmlForTracking(html: string, recipientId: string, baseUrl = publicAppUrl()) {
+function footerText(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+export function wrapEmailHtmlForTracking(
+  html: string,
+  recipientId: string,
+  baseUrl = publicAppUrl(),
+  identity?: { companyName?: string | null; postalAddress?: string | null },
+) {
   const unwrapped = unwrapTrackingLinks(html);
   if (!isStableTrackingOrigin(baseUrl) && !isLocalTrackingOrigin(baseUrl)) return unwrapped;
   const origin = baseUrl.replace(/\/$/, "");
@@ -153,8 +168,10 @@ export function wrapEmailHtmlForTracking(html: string, recipientId: string, base
     const tracked = `${origin}/t/${encodeURIComponent(recipientId)}?u=${encodeURIComponent(dest)}`;
     return `href=${quote}${tracked}${quote}`;
   });
-  const unsubscribe = `${origin}/t/${encodeURIComponent(recipientId)}/unsubscribe`;
-  const footer = `<p style="margin:16px 0 0;color:#777777;font-size:12px;line-height:1.5;">If you no longer want these emails, <a href="${unsubscribe}" style="color:#777777;">unsubscribe</a>.</p>`;
+  const unsubscribe = recipientId === "test" ? `${origin}/t/test/unsubscribe` : unsubscribeUrl(origin, recipientId);
+  const company = footerText(identity?.companyName?.trim() || "Aveska");
+  const address = identity?.postalAddress?.trim() ? `<br>${footerText(identity.postalAddress.trim())}` : "";
+  const footer = `<p style="margin:16px 0 0;color:#777777;font-size:12px;line-height:1.5;">${company}${address}<br>If you no longer want these emails, <a href="${unsubscribe}" style="color:#777777;">unsubscribe</a>.</p>`;
   const pixel = `<img src="${origin}/t/${encodeURIComponent(recipientId)}/open" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;" />`;
   const alreadyOpen =
     withLinks.includes(`${origin}/t/${recipientId}/open`) ||

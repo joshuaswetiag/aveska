@@ -5,14 +5,17 @@ export function usePageData<T>(path: string | null, options?: { search?: boolean
   const location = useLocation();
   const includeSearch = options?.search !== false && path != null && !path.includes("?");
   const url = path == null ? null : includeSearch ? `${path}${location.search}` : path;
-  const [data, setData] = useState<T | null>(null);
-  const [status, setStatus] = useState<"loading" | "ready" | "missing" | "error">("loading");
+  const [loaded, setLoaded] = useState<{ url: string; data: T | null; status: "ready" | "missing" | "error" } | null>(null);
+  const data = loaded?.url === url ? loaded.data : null;
+  const status: "loading" | "ready" | "missing" | "error" = !url
+    ? "loading"
+    : loaded?.url === url
+      ? loaded.status
+      : "loading";
 
   useEffect(() => {
     if (!url) return;
     let cancelled = false;
-    setData(null);
-    setStatus("loading");
 
     const load = () => {
       fetch(url, { credentials: "same-origin" })
@@ -23,19 +26,17 @@ export function usePageData<T>(path: string | null, options?: { search?: boolean
             return;
           }
           if (res.status === 404) {
-            setData(null);
-            setStatus("missing");
+            setLoaded({ url, data: null, status: "missing" });
             return;
           }
           if (!res.ok) {
-            setStatus("error");
+            setLoaded({ url, data: null, status: "error" });
             return;
           }
-          setData((await res.json()) as T);
-          setStatus("ready");
+          setLoaded({ url, data: (await res.json()) as T, status: "ready" });
         })
         .catch(() => {
-          if (!cancelled) setStatus("error");
+          if (!cancelled) setLoaded({ url, data: null, status: "error" });
         });
     };
 

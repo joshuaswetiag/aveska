@@ -1,5 +1,6 @@
 import { hash } from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
+import { toCents } from "../src/lib/money";
 import { extractVehicle } from "../src/lib/vehicle/extract";
 import { upsertVehicleFromExtraction } from "../src/lib/vehicle/persist";
 
@@ -107,6 +108,7 @@ async function main() {
     const existing = await prisma.product.findFirst({ where: { sku: item.sku } });
     const data = {
       ...item,
+      price: toCents(item.price),
       nameRaw: item.name,
       searchableText: `${item.name} ${item.make} ${item.series.join(" ")}`.toLowerCase(),
     };

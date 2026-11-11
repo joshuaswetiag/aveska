@@ -11,7 +11,6 @@ import {
   likeTerm,
   parseDate,
   parseInteger,
-  parseNumber,
 } from "@/lib/utils";
 import type { ImportType } from "@prisma/client";
 
@@ -70,8 +69,12 @@ export async function importOrders(importJobId: string, rows: ParsedRow[], mappi
         mapped.email,
         mapped.product_name,
         mapped.quantity,
+        mapped.unit_price,
+        mapped.line_total,
       ]);
-      const existing = await prisma.order.findFirst({ where: { sourceRowHash: hash } });
+      const existing =
+        (await prisma.orderItem.findFirst({ where: { sourceRowHash: hash }, select: { id: true } })) ??
+        (await prisma.order.findFirst({ where: { sourceRowHash: hash }, select: { id: true } }));
       if (existing) {
         duplicates += 1;
         continue;
@@ -118,16 +121,32 @@ export async function importOrders(importJobId: string, rows: ParsedRow[], mappi
 
       const orderDate = parseDate(mapped.order_date);
       const externalId = str(mapped.order_id);
+      if (!externalId) {
+        errors += 1;
+        await prisma.importRowError.create({
+          data: {
+            importJobId,
+            rowNumber: i + 2,
+            field: "order_id",
+            message: "Order id is required. Rows without one are not imported as separate orders.",
+            rawData: rows[i] as object,
+          },
+        });
+        continue;
+      }
+      const quantity = parseInteger(mapped.quantity) ?? 1;
+      const unitPrice = toCents(mapped.unit_price);
       const itemData = {
         productId: product?.id,
         sku,
         productName: productNameRaw,
         productNameRaw,
-        quantity: parseInteger(mapped.quantity) ?? 1,
-        unitPrice: toCents(mapped.unit_price) ?? undefined,
-        lineTotal: toCents(mapped.line_total) ?? toCents(mapped.unit_price) ?? undefined,
+        quantity,
+        unitPrice: unitPrice ?? undefined,
+        lineTotal: toCents(mapped.line_total) ?? (unitPrice == null ? undefined : unitPrice * quantity),
         productUrl: str(mapped.product_url),
         category: str(mapped.category),
+        sourceRowHash: hash,
       };
       const existingOrder = externalId
         ? await prisma.order.findFirst({ where: { externalId }, select: { id: true } })
@@ -301,6 +320,8 @@ export async function importCatalogue(importJobId: string, rows: ParsedRow[], ma
         const update = Object.fromEntries(
           Object.entries(data).filter(([key, value]) => {
             if (key === "importJobId" || key === "originalData") return true;
+            if ((key === "stock" || key === "stockStatus") && !stockRaw && stockNum == null) return false;
+            if (key === "searchableText" && !str(mapped.description) && !str(mapped.make) && !str(mapped.fitment) && !str(mapped.vehicle)) return false;
             if (value == null || value === "") return false;
             if (Array.isArray(value) && value.length === 0) return false;
             return true;

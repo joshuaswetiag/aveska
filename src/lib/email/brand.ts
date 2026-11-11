@@ -5,7 +5,7 @@ export const AVESKA_RED = "#BC2213";
 export const AVESKA_LOGO_CID = "aveska-logo";
 
 export function resolveEmailLogoSrc(logoUrl?: string | null): string {
-  if (logoUrl && /^https?:\/\//i.test(logoUrl)) return logoUrl;
+  if (logoUrl && /^https?:\/\/[^\s"'<>]+$/i.test(logoUrl)) return logoUrl;
   return AVESKA_LOGO_URL;
 }
 

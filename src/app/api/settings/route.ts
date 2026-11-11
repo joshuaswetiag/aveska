@@ -35,6 +35,7 @@ export async function POST(request: Request) {
       shopUrl: body.shopUrl || null,
       contactUrl: body.contactUrl || null,
       companyName: body.companyName || "Aveska",
+      postalAddress: typeof body.postalAddress === "string" && body.postalAddress.trim() ? body.postalAddress.trim() : null,
     },
   });
   await saveTrackingUrl(trackingUrl);

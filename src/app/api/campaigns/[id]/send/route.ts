@@ -42,12 +42,12 @@ async function sendSummary(campaignId: string) {
   }).length;
   const sent = campaign.recipients.filter((row) => row.sent).length;
   const failed = campaign.recipients.filter((row) => row.sendError && !row.sent).length;
-  const running = await prisma.job.findFirst({
+  const runningJobs = await prisma.job.findMany({
     where: { type: "SEND_CAMPAIGN", status: { in: ["QUEUED", "RUNNING"] } },
     orderBy: { createdAt: "desc" },
+    take: 20,
   });
-  const runningThis =
-    running && (running.payload as { campaignId?: string } | null)?.campaignId === campaignId ? running.id : null;
+  const runningThis = runningJobs.find((job) => (job.payload as { campaignId?: string } | null)?.campaignId === campaignId)?.id ?? null;
   return {
     campaignId,
     status: campaign.status,

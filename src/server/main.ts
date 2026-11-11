@@ -67,7 +67,7 @@ function serveStatic(req: IncomingMessage, res: ServerResponse) {
 
 async function boot() {
   const { ensureJobTypeEnum } = await import("@/lib/ensure-job-types");
-  const { ensureAdminUser } = await import("@/lib/ensure-admin");
+  const { ensureFirstAdmin } = await import("@/lib/ensure-admin");
   const { startJobWorker } = await import("@/lib/jobs/worker");
   const { ensureFullSyncQueued } = await import("@/lib/catalogue/full-sync");
   try {
@@ -76,7 +76,7 @@ async function boot() {
     console.error("Could not ensure job types", error);
   }
   try {
-    await ensureAdminUser();
+    await ensureFirstAdmin();
   } catch (error) {
     console.error("Could not ensure admin user", error);
   }

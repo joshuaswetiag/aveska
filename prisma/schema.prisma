@@ -130,6 +130,14 @@ model Session {
   @@index([expiresAt])
 }
 
+/// Migration bookkeeping. Not used by the app.
+model AveskaMeta {
+  key   String @id
+  value String
+
+  @@map("_aveska_meta")
+}
+
 model Customer {
   id                 String               @id @default(cuid())
   externalId         String?
@@ -203,9 +211,11 @@ model OrderItem {
   category              String?
   extractedVehicle      Json?
   extractionConfidence  Decimal?
+  sourceRowHash         String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
+  @@unique([orderId, sourceRowHash])
   @@index([orderId])
   @@index([productId])
   @@index([sku])
@@ -667,6 +677,7 @@ model Settings {
   maropostApiKey          String?
   maropostCampaignName    String?
   companyName             String   @default("Aveska")
+  postalAddress           String?
   logoUrl                 String?
   trackingUrl             String?
   aiProvider              String?

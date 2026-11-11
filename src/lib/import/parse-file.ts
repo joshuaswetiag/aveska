@@ -48,8 +48,9 @@ function excelCell(value: unknown): unknown {
   if (typeof value === "object") {
     const cell = value as { result?: unknown; text?: string; richText?: Array<{ text: string }> };
     if ("result" in cell && cell.result != null) return cell.result;
-    if (typeof cell.text === "string") return cell.text;
+    if (typeof cell.text === "string" && cell.text !== "[object Object]") return cell.text;
     if (Array.isArray(cell.richText)) return cell.richText.map((part) => part.text).join("");
+    return null;
   }
   return value;
 }
@@ -73,6 +74,10 @@ export async function parseSpreadsheet(buffer: Buffer, fileName: string): Promis
     return { headers, rows, preview: rows.slice(0, MAX_PREVIEW), totalRows: rows.length };
   }
 
+  if (lower.endsWith(".xls") && !lower.endsWith(".xlsx")) {
+    throw new Error("Legacy .xls files are not supported. Save the spreadsheet as .xlsx or CSV and upload it again.");
+  }
+
   if (lower.endsWith(".csv") || lower.endsWith(".txt")) {
     const result = Papa.parse<string[]>(buffer.toString("utf8"), {
       skipEmptyLines: true,
@@ -93,6 +98,7 @@ export async function parseSpreadsheet(buffer: Buffer, fileName: string): Promis
 }
 
 function sheetSafe(value: unknown) {
+  if (typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "string" && /^[=+\-@\t\r]/.test(value)) return `'${value}`;
   return value ?? "";
 }
@@ -110,6 +116,7 @@ export async function toXlsx(sheets: Array<{ name: string; rows: Record<string, 
 }
 
 function csvSafe(value: unknown) {
+  if (typeof value === "number" || typeof value === "boolean") return value;
   const text = value == null ? "" : String(value);
   return /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
 }
