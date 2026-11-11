@@ -82,7 +82,11 @@ export async function sendCampaign(
   }
 
   const recipients = await prisma.campaignRecipient.findMany({
-    where: { campaignId, sent: false },
+    where: {
+      campaignId,
+      sent: false,
+      NOT: { sendError: { startsWith: "Skipped:" } },
+    },
     select: {
       id: true,
       sent: true,
@@ -134,6 +138,11 @@ export async function sendCampaign(
   let remaining = candidates.length;
   try {
     for (const [index, candidate] of candidates.entries()) {
+      const onWorker = readEnv("AVESKA_RUNTIME") === "worker";
+      if (onWorker && index > 0 && Date.now() - startedAt > 20_000) {
+        paused = true;
+        break;
+      }
       const recipient = recipients.find((row) => row.id === candidate.id);
       const to = recipient?.customer.emailNormalized || normalizeEmail(recipient?.customer.email);
       const subject = recipient?.subject || campaign.subject || campaign.name;
@@ -232,11 +241,6 @@ export async function sendCampaign(
           .catch(() => undefined);
       }
       if (config.delayMs) await sleep(config.delayMs);
-      const onWorker = readEnv("AVESKA_RUNTIME") === "worker";
-      if (onWorker && Date.now() - startedAt > 20_000 && index < candidates.length - 1) {
-        paused = true;
-        break;
-      }
     }
   } finally {
     remaining = await prisma.campaignRecipient.count({

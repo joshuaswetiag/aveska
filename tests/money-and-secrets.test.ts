@@ -8,6 +8,11 @@ describe("money", () => {
     expect(toCents("189.005")).toBe(18901);
     expect(toCents("$1,299.00")).toBe(129900);
     expect(toCents("1,299.00")).toBe(129900);
+    expect(toCents("POA")).toBeNull();
+    expect(toCents("N/A")).toBeNull();
+    expect(toCents(" ")).toBeNull();
+    expect(toCents("(12.50)")).toBe(-1250);
+    expect(toCents("0")).toBe(0);
     expect(fromCents(18900)).toBe(189);
     expect(fromCents(toCents(12.34))).toBe(12.34);
   });

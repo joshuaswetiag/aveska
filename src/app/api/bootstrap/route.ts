@@ -86,7 +86,7 @@ export async function GET() {
       // Key missing this request but store already has data — don't block the UI.
       enqueueError = "";
     }
-    if (readEnv("NETO_API_KEY")?.trim()) {
+    if (session.user.role !== "READONLY" && readEnv("NETO_API_KEY")?.trim()) {
       try {
         job = await ensureFullSyncQueued(session.user.id);
       } catch (error) {

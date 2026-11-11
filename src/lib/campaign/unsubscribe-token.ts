@@ -24,3 +24,12 @@ export function validUnsubscribeToken(recipientId: string, token: string | null)
   if (expected.length !== given.length) return false;
   return timingSafeEqual(expected, given);
 }
+
+/** Emails sent before signed links shipped have no ?t= parameter. */
+export const LEGACY_UNSIGNED_UNTIL = Date.parse("2026-11-12T00:00:00.000Z");
+
+export function unsignedUnsubscribeStillValid(sentAt: Date | string | null | undefined) {
+  if (!sentAt) return false;
+  const time = sentAt instanceof Date ? sentAt.getTime() : Date.parse(sentAt);
+  return Number.isFinite(time) && time < LEGACY_UNSIGNED_UNTIL;
+}

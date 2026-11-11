@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils";
-import { validUnsubscribeToken } from "@/lib/campaign/unsubscribe-token";
+import { unsignedUnsubscribeStillValid, validUnsubscribeToken } from "@/lib/campaign/unsubscribe-token";
 
 function page(title: string, body: string) {
   return new Response(
@@ -11,6 +11,16 @@ function page(title: string, body: string) {
 
 function tokenFrom(request: Request) {
   return new URL(request.url).searchParams.get("t");
+}
+
+async function linkAllowed(recipientId: string, token: string | null) {
+  if (validUnsubscribeToken(recipientId, token)) return true;
+  if (token) return false;
+  const row = await prisma.campaignRecipient.findUnique({
+    where: { id: recipientId },
+    select: { sent: true, sentAt: true },
+  });
+  return Boolean(row?.sent && unsignedUnsubscribeStillValid(row.sentAt));
 }
 
 async function unsubscribe(recipientId: string) {
@@ -48,7 +58,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ reci
     return page("Test email", "This is a test message. Nobody was unsubscribed.");
   }
   const token = tokenFrom(request);
-  if (!validUnsubscribeToken(id, token)) {
+  if (!(await linkAllowed(id, token))) {
     return page("Link expired", "This unsubscribe link is not valid.");
   }
   const action = new URL(request.url).pathname + new URL(request.url).search;
@@ -62,7 +72,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ rec
   const { recipientId } = await params;
   const id = decodeURIComponent(recipientId);
   if (id === "test") return page("Test email", "This is a test message. Nobody was unsubscribed.");
-  if (!validUnsubscribeToken(id, tokenFrom(request))) {
+  if (!(await linkAllowed(id, tokenFrom(request)))) {
     return page("Link expired", "This unsubscribe link is not valid.");
   }
   await unsubscribe(id);

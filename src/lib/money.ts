@@ -1,11 +1,19 @@
 /** Store money as integer cents so SQLite does not round decimal prices. */
 
 export function toCents(value: number | string | null | undefined): number | null {
-  if (value == null || value === "") return null;
-  const num =
-    typeof value === "number" ? value : Number(String(value).replace(/[^0-9.-]/g, ""));
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return null;
+    return Math.round(value * 100);
+  }
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw || /[a-z]/i.test(raw)) return null;
+  const wrapped = raw.startsWith("(") && raw.endsWith(")");
+  const cleaned = (wrapped ? raw.slice(1, -1) : raw).replace(/[^0-9.-]/g, "");
+  if (!/\d/.test(cleaned)) return null;
+  const num = Number(cleaned);
   if (!Number.isFinite(num)) return null;
-  return Math.round(num * 100);
+  return Math.round((wrapped ? -Math.abs(num) : num) * 100);
 }
 
 export function fromCents(value: number | string | null | undefined): number | null {

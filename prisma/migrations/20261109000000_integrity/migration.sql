@@ -146,21 +146,6 @@ WHERE "customerId" IN (SELECT "dropId" FROM "_aveska_customer_dup");
 UPDATE "CampaignTraffic" SET "customerId" = (SELECT "keepId" FROM "_aveska_customer_dup" WHERE "dropId" = "CampaignTraffic"."customerId")
 WHERE "customerId" IN (SELECT "dropId" FROM "_aveska_customer_dup");
 
-UPDATE "Customer" SET
-  "totalOrders" = (SELECT COUNT(*) FROM "Order" o WHERE o."customerId" = "Customer"."id"),
-  "totalSpend" = (SELECT COALESCE(SUM(o."orderTotal"), 0) FROM "Order" o WHERE o."customerId" = "Customer"."id"),
-  "averageOrderValue" = CASE
-    WHEN (SELECT COUNT(*) FROM "Order" o WHERE o."customerId" = "Customer"."id") = 0 THEN 0
-    ELSE CAST(ROUND(
-      (SELECT COALESCE(SUM(o."orderTotal"), 0) FROM "Order" o WHERE o."customerId" = "Customer"."id") * 1.0
-      / (SELECT COUNT(*) FROM "Order" o WHERE o."customerId" = "Customer"."id")
-    ) AS INTEGER)
-  END,
-  "firstPurchaseAt" = (SELECT MIN(o."orderDate") FROM "Order" o WHERE o."customerId" = "Customer"."id"),
-  "lastPurchaseAt" = (SELECT MAX(o."orderDate") FROM "Order" o WHERE o."customerId" = "Customer"."id"),
-  "vehicleCount" = (SELECT COUNT(*) FROM "CustomerVehicle" cv WHERE cv."customerId" = "Customer"."id")
-WHERE "id" IN (SELECT "keepId" FROM "_aveska_customer_dup");
-
 DELETE FROM "Customer" WHERE "id" IN (SELECT "dropId" FROM "_aveska_customer_dup");
 
 DROP TABLE IF EXISTS "_aveska_product_dup";
@@ -244,25 +229,37 @@ WHERE o."externalId" IS NOT NULL
   AND o."id" != keeper."id";
 
 INSERT INTO "_aveska_rank" ("id", "rn")
-SELECT oi."id",
-  ROW_NUMBER() OVER (
-    PARTITION BY
-      CASE WHEN m."keepId" IS NOT NULL THEN m."keepId" ELSE oi."orderId" END,
-      COALESCE(oi."sku", ''),
-      oi."productName",
-      oi."quantity",
-      COALESCE(oi."unitPrice", -1)
-    ORDER BY oi."createdAt" ASC, oi."id" ASC
-  )
-FROM "OrderItem" oi
-LEFT JOIN "_aveska_order_dup" m ON m."dropId" = oi."orderId"
-WHERE oi."orderId" IN (SELECT "dropId" FROM "_aveska_order_dup")
-   OR oi."orderId" IN (SELECT "keepId" FROM "_aveska_order_dup");
-DELETE FROM "OrderItem" WHERE "id" IN (SELECT "id" FROM "_aveska_rank" WHERE "rn" > 1);
+SELECT dropped."id", 2
+FROM "OrderItem" dropped
+JOIN "_aveska_order_dup" m ON m."dropId" = dropped."orderId"
+WHERE EXISTS (
+  SELECT 1 FROM "OrderItem" kept
+  WHERE kept."orderId" = m."keepId"
+    AND COALESCE(kept."sku", '') = COALESCE(dropped."sku", '')
+    AND kept."productName" = dropped."productName"
+    AND kept."quantity" = dropped."quantity"
+    AND COALESCE(kept."unitPrice", -1) = COALESCE(dropped."unitPrice", -1)
+);
+DELETE FROM "OrderItem" WHERE "id" IN (SELECT "id" FROM "_aveska_rank");
 DELETE FROM "_aveska_rank";
 UPDATE "OrderItem" SET "orderId" = (SELECT "keepId" FROM "_aveska_order_dup" WHERE "dropId" = "OrderItem"."orderId")
 WHERE "orderId" IN (SELECT "dropId" FROM "_aveska_order_dup");
 DELETE FROM "Order" WHERE "id" IN (SELECT "dropId" FROM "_aveska_order_dup");
+
+UPDATE "Customer" SET
+  "totalOrders" = (SELECT COUNT(*) FROM "Order" o WHERE o."customerId" = "Customer"."id"),
+  "totalSpend" = (SELECT COALESCE(SUM(o."orderTotal"), 0) FROM "Order" o WHERE o."customerId" = "Customer"."id"),
+  "averageOrderValue" = CASE
+    WHEN (SELECT COUNT(*) FROM "Order" o WHERE o."customerId" = "Customer"."id") = 0 THEN 0
+    ELSE CAST(ROUND(
+      (SELECT COALESCE(SUM(o."orderTotal"), 0) FROM "Order" o WHERE o."customerId" = "Customer"."id") * 1.0
+      / (SELECT COUNT(*) FROM "Order" o WHERE o."customerId" = "Customer"."id")
+    ) AS INTEGER)
+  END,
+  "firstPurchaseAt" = (SELECT MIN(o."orderDate") FROM "Order" o WHERE o."customerId" = "Customer"."id"),
+  "lastPurchaseAt" = (SELECT MAX(o."orderDate") FROM "Order" o WHERE o."customerId" = "Customer"."id"),
+  "vehicleCount" = (SELECT COUNT(*) FROM "CustomerVehicle" cv WHERE cv."customerId" = "Customer"."id")
+WHERE "id" IN (SELECT "keepId" FROM "_aveska_customer_dup");
 
 CREATE UNIQUE INDEX IF NOT EXISTS "Customer_emailNormalized_key" ON "Customer"("emailNormalized");
 CREATE UNIQUE INDEX IF NOT EXISTS "Product_skuNormalized_key" ON "Product"("skuNormalized");
