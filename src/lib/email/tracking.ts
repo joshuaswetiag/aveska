@@ -157,7 +157,7 @@ export function wrapEmailHtmlForTracking(
   html: string,
   recipientId: string,
   baseUrl = publicAppUrl(),
-  identity?: { companyName?: string | null; postalAddress?: string | null },
+  identity?: { companyName?: string | null; postalAddress?: string | null; unsubscribeRecipientId?: string | null },
 ) {
   const unwrapped = unwrapTrackingLinks(html);
   if (!isStableTrackingOrigin(baseUrl) && !isLocalTrackingOrigin(baseUrl)) return unwrapped;
@@ -169,7 +169,8 @@ export function wrapEmailHtmlForTracking(
     const tracked = `${origin}/t/${encodeURIComponent(recipientId)}?u=${encodeURIComponent(dest)}`;
     return `href=${quote}${tracked}${quote}`;
   });
-  const unsubscribe = recipientId === "test" ? `${origin}/t/test/unsubscribe` : unsubscribeUrl(origin, recipientId);
+  const unsubscribeId = identity?.unsubscribeRecipientId || recipientId;
+  const unsubscribe = unsubscribeId === "test" ? `${origin}/t/test/unsubscribe` : unsubscribeUrl(origin, unsubscribeId);
   const company = footerText(identity?.companyName?.trim() || "Aveska");
   const address = identity?.postalAddress?.trim() ? `<br>${footerText(identity.postalAddress.trim())}` : "";
   const footer = `<p style="margin:16px 0 0;color:#777777;font-size:12px;line-height:1.5;">${company}${address}<br>If you no longer want these emails, <a href="${unsubscribe}" style="color:#777777;">unsubscribe</a>.</p>`;

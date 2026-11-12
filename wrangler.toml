@@ -7,6 +7,8 @@ compatibility_flags = ["nodejs_compat"]
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# Browser navigations were getting index.html instead of the /t/ redirect, so product links never left the app.
+run_worker_first = ["/api/*", "/t/*"]
 
 [[d1_databases]]
 binding = "DB"

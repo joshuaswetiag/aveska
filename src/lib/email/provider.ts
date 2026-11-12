@@ -58,6 +58,29 @@ function safeUrl(value: string) {
   return "#";
 }
 
+function httpUrl(value: string | null | undefined) {
+  const trimmed = value?.trim() ?? "";
+  return /^https?:\/\//i.test(trimmed) ? trimmed : "";
+}
+
+function productLink(
+  products: Array<{ url: string }>,
+  ctaUrl: string,
+) {
+  const product = products.map((item) => httpUrl(item.url)).find(Boolean) || "";
+  const cta = httpUrl(ctaUrl);
+  if (!cta) return product;
+  try {
+    const parsed = new URL(cta);
+    const host = parsed.hostname.toLowerCase();
+    const home = (host === "aveska.com.au" || host === "www.aveska.com.au") && (parsed.pathname === "/" || parsed.pathname === "");
+    if (home && product) return product;
+  } catch {
+    return product || cta;
+  }
+  return cta;
+}
+
 export function renderEmailHtml(
   copy: Omit<EmailCopy, "html">,
   products: Array<{
@@ -95,7 +118,7 @@ export function renderEmailHtml(
     .join("");
 
   const logoSrc = resolveEmailLogoSrc(options?.logoUrl);
-  const shopHref = copy.ctaUrl || "#";
+  const shopHref = productLink(products, copy.ctaUrl);
 
   return `<!DOCTYPE html>
 <html>
@@ -129,7 +152,7 @@ export function renderEmailHtml(
           <div style="color:#333333;font-size:15px;line-height:1.6;">${escapeHtml(copy.body).replaceAll("\n", "<br/>")}</div>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;margin-top:20px;">${cards}</table>
           <p style="margin:28px 0;">
-            <a href="${safeUrl(copy.ctaUrl)}" style="background:${AVESKA_RED};color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:0;display:inline-block;font-weight:700;letter-spacing:0.04em;">${escapeHtml(copy.ctaLabel)}</a>
+            <a href="${safeUrl(shopHref)}" style="background:${AVESKA_RED};color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:0;display:inline-block;font-weight:700;letter-spacing:0.04em;">${escapeHtml(copy.ctaLabel)}</a>
           </p>
           <p style="color:#555555;font-size:13px;line-height:1.5;">${escapeHtml(copy.footer).replaceAll("\n", "<br/>")}</p>
         </td></tr>

@@ -219,7 +219,7 @@ export async function syncNetoOrders(
     let pagesRun = 0;
     for (;;) {
       if (pagesRun >= maxPages || Date.now() >= deadline) break;
-      const { orders } = await fetchNetoOrderPage(page, pageSize, pass.filter);
+      const { orders, totalRecords } = await fetchNetoOrderPage(page, pageSize, pass.filter);
     if (!orders.length) {
       done = true;
       break;
@@ -403,16 +403,14 @@ export async function syncNetoOrders(
 
     pagesRun += 1;
     nextPage = page + 1;
+    const knownTotal = totalRecords > 0 ? Math.max(imported, totalRecords) : Math.max(imported, (page + 1) * pageSize);
     if (onProgress) {
-      await onProgress(
-        imported,
-        Math.max(imported, (page + 1) * pageSize),
-        `Imported ${imported.toLocaleString()} orders (${pass.label})`,
-      );
+      await onProgress(imported, knownTotal, `Imported ${imported.toLocaleString()} orders (${pass.label})`);
     }
     await options?.onPage?.({ nextPage, imported });
     page += 1;
-    if (page > 2000) {
+    // A short page is the last page. Waiting for an empty follow-up page left the job on "Continuing…" at 26/100.
+    if (orders.length < pageSize || page > 2000) {
       done = true;
       break;
     }

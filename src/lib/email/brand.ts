@@ -9,8 +9,16 @@ export function resolveEmailLogoSrc(logoUrl?: string | null): string {
   return AVESKA_LOGO_URL;
 }
 
+/** Stored campaigns were rendered before a shop URL existed, so the logo and button are href="#". Point those at the first real product. */
+export function repairDeadEmailLinks(html: string): string {
+  const match = html.match(/href=(["'])(https:\/\/(?:www\.)?aveska\.com\.au\/(?!assets\/)[^"']+)\1/i);
+  const product = match?.[2];
+  if (!product) return html;
+  return html.replace(/href=(["'])(?:#|\{\{\s*shop_url\s*\}\})\1/gi, `href=$1${product}$1`);
+}
+
 export function restyleCampaignHtml(html: string): string {
-  return html
+  return repairDeadEmailLinks(html)
     .replace(/background:#000000/gi, "background:#ffffff")
     .replace(/background:#f6f3ee/gi, "background:#ffffff")
     .replace(/#9a3412/gi, AVESKA_RED)

@@ -64,9 +64,13 @@ export async function sendCampaign(
     if (!sample?.bodyHtml && !campaign.bodyHtml) throw new Error("This campaign has no email HTML to send.");
     const html = wrapEmailHtmlForTracking(
       restyleCampaignHtml(sample?.bodyHtml || campaign.bodyHtml || ""),
-      "test",
+      sample?.id || "test",
       trackingBase ?? "",
-      { companyName: settings?.companyName, postalAddress: settings?.postalAddress },
+      {
+        companyName: settings?.companyName,
+        postalAddress: settings?.postalAddress,
+        unsubscribeRecipientId: "test",
+      },
     );
     const transport = await getEmailTransport();
     await options.onProgress?.(0, 1, connectingMessage(config.provider, config.host, config.port));

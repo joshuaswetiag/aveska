@@ -71,6 +71,23 @@ describe("email generation", () => {
     expect(html).not.toContain("background:#000000");
   });
 
+  it("points the button at the product when the shop link is only the homepage", () => {
+    const html = renderEmailHtml(
+      {
+        subject: "Parts",
+        preheader: "More parts",
+        greeting: "Hi John,",
+        body: "Selected parts.",
+        ctaLabel: "View parts",
+        ctaUrl: "https://www.aveska.com.au/",
+        footer: "Aveska",
+      },
+      [{ name: "Floor panel", url: "https://www.aveska.com.au/holden-floor-panel", price: "$99.00" }],
+    );
+    expect(html).toContain('href="https://www.aveska.com.au/holden-floor-panel"');
+    expect(html).not.toContain('href="#"');
+  });
+
   it("restyles stored emails onto the white Aveska template", async () => {
     const { htmlWithInlineLogo } = await import("@/lib/email/logo");
     const { restyleCampaignHtml, AVESKA_LOGO_URL, AVESKA_RED } = await import("@/lib/email/brand");
@@ -80,6 +97,11 @@ describe("email generation", () => {
     expect(restyled).toContain(AVESKA_RED);
     expect(restyled).toContain("background:#ffffff");
     expect(restyled).not.toContain("data:image/png");
+    const dead = restyleCampaignHtml(
+      `<a href="#">Logo</a><a href="https://www.aveska.com.au/holden-floor-panel?utm_source=email&amp;utm_medium=email">View product</a><a href="#">Shop</a>`,
+    );
+    expect(dead).not.toContain('href="#"');
+    expect(dead.match(/holden-floor-panel/g)?.length).toBe(3);
     const outbound = htmlWithInlineLogo(oldHtml);
     if (outbound.attachments.length) {
       expect(outbound.html).toContain('src="cid:aveska-logo"');

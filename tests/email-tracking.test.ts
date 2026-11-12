@@ -16,6 +16,17 @@ describe("email click tracking", () => {
     expect(wrapped).toContain("/t/rec123/open");
   });
 
+  it("tracks a test click on the sample recipient and keeps unsubscribe on the test id", () => {
+    const html = `<a href="https://www.aveska.com.au/products/seat-belt">View product</a></body>`;
+    const wrapped = wrapEmailHtmlForTracking(html, "rec123", "https://mail.aveska.com.au", {
+      unsubscribeRecipientId: "test",
+    });
+    expect(wrapped).toContain("https://mail.aveska.com.au/t/rec123?u=");
+    expect(wrapped).toContain("/t/rec123/open");
+    expect(wrapped).toContain("https://mail.aveska.com.au/t/test/unsubscribe");
+    expect(wrapped).not.toContain("/t/rec123/unsubscribe");
+  });
+
   it("wraps Aveska product links when the app has a public https URL", () => {
     const html = `<a href="https://www.aveska.com.au/products/seat-belt">View product</a></body>`;
     const wrapped = wrapEmailHtmlForTracking(html, "rec123", "https://mail.aveska.com.au");

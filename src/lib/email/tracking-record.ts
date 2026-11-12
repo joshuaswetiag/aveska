@@ -85,22 +85,53 @@ export async function ensureRailwayTrackingUrl() {
   return resolveTrackingBaseUrl();
 }
 
+const recipientSelect = { id: true, campaignId: true, customerId: true, opened: true, clicked: true } as const;
+
+async function recipientForTestSend() {
+  const job = await prisma.job.findFirst({
+    where: { type: "SEND_CAMPAIGN", status: "COMPLETED" },
+    orderBy: { createdAt: "desc" },
+    select: { payload: true },
+  });
+  const payload = (job?.payload ?? {}) as { campaignId?: string; recipientId?: string };
+  if (payload.recipientId) {
+    const chosen = await prisma.campaignRecipient.findUnique({
+      where: { id: payload.recipientId },
+      select: recipientSelect,
+    });
+    if (chosen) return chosen;
+  }
+  if (payload.campaignId) {
+    const chosen = await prisma.campaignRecipient.findFirst({
+      where: { campaignId: payload.campaignId },
+      orderBy: { createdAt: "asc" },
+      select: recipientSelect,
+    });
+    if (chosen) return chosen;
+  }
+  return prisma.campaignRecipient.findFirst({ orderBy: { createdAt: "asc" }, select: recipientSelect });
+}
+
 export async function recordCampaignTraffic(input: {
   recipientId: string;
   type: "CLICK" | "OPEN";
   url?: string | null;
 }) {
-  const recipient = await prisma.campaignRecipient.findUnique({
-    where: { id: input.recipientId },
-    select: { id: true, campaignId: true, customerId: true, opened: true, clicked: true },
-  });
+  const isTest = input.recipientId === "test";
+  const recipient = isTest
+    ? await recipientForTestSend()
+    : await prisma.campaignRecipient.findUnique({
+        where: { id: input.recipientId },
+        select: recipientSelect,
+      });
   if (!recipient) {
     console.warn("Traffic not recorded: campaign recipient not found", input.recipientId, input.type);
     return null;
   }
   const now = new Date();
-  const label =
+  const baseLabel =
     input.type === "CLICK" && input.url ? trackingLinkLabel(input.url) : input.type === "OPEN" ? "Opened email" : null;
+  const label = isTest && baseLabel ? `Test · ${baseLabel}` : baseLabel;
   await prisma.campaignTraffic.create({
     data: {
       campaignId: recipient.campaignId,

@@ -341,6 +341,14 @@ export async function processNextJob(jobId?: string) {
           });
           return job.id;
         }
+        await prisma.job.updateMany({
+          where: { id: job.id, status: "RUNNING" },
+          data: {
+            message: `Synced ${chunk.imported.toLocaleString()} orders`,
+            progress: Math.max(chunk.imported, 1),
+            total: Math.max(chunk.imported, 1),
+          },
+        });
         result = chunk;
       } else {
         const { syncNetoCatalogue } = await import("@/lib/catalogue/neto");
