@@ -6,11 +6,18 @@ import { useRouter } from "@/lib/router";
 export function JobPoller({ id, status }: { id: string; status: string }) {
   const router = useRouter();
   const kicked = useRef<string | null>(null);
+  const busy = useRef(false);
   useEffect(() => {
     if (status === "COMPLETED" || status === "FAILED" || status === "CANCELLED") return;
     const kick = () => {
       if (status !== "QUEUED" && status !== "RUNNING") return;
-      void fetch(`/api/jobs/${id}/process`, { method: "POST" }).catch(() => undefined);
+      if (busy.current) return;
+      busy.current = true;
+      void fetch(`/api/jobs/${id}/process`, { method: "POST" })
+        .catch(() => undefined)
+        .finally(() => {
+          busy.current = false;
+        });
     };
     if (kicked.current !== id) {
       kicked.current = id;

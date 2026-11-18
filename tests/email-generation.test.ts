@@ -71,6 +71,38 @@ describe("email generation", () => {
     expect(html).not.toContain("background:#000000");
   });
 
+  it("points the button at a vehicle search and leaves each product link alone", () => {
+    const html = renderEmailHtml(
+      {
+        subject: "Parts",
+        preheader: "More parts",
+        greeting: "Hi Leslie,",
+        body: "Selected parts.",
+        ctaLabel: "View HJ/HX/HQ/HZ/WB parts",
+        ctaUrl: "https://www.aveska.com.au/?rf=kw&kw=Holden+Kingswood",
+        footer: "Aveska",
+      },
+      [{ name: "Floor panel", url: "https://www.aveska.com.au/holden-floor-panel", price: "$99.00" }],
+    );
+    expect(html).toContain('href="https://www.aveska.com.au/?rf=kw&amp;kw=Holden+Kingswood"');
+    expect(html).toContain('href="https://www.aveska.com.au/holden-floor-panel"');
+  });
+
+  it("builds the shop search from make and model", async () => {
+    const { vehicleSearchKeyword } = await import("@/lib/email/copy");
+    const { shopKeywordSearchUrl } = await import("@/lib/email/provider");
+    const keyword = vehicleSearchKeyword({
+      vehicle: "Holden Kingswood HJ/HX/HQ/HZ/WB Ute",
+      make: "Holden",
+      model: "Kingswood",
+      series: "HJ/HX/HQ/HZ/WB",
+    });
+    expect(keyword).toBe("Holden Kingswood");
+    expect(shopKeywordSearchUrl("https://www.aveska.com.au", keyword)).toBe(
+      "https://www.aveska.com.au/?rf=kw&kw=Holden+Kingswood",
+    );
+  });
+
   it("points the button at the product when the shop link is only the homepage", () => {
     const html = renderEmailHtml(
       {

@@ -17,6 +17,21 @@ export function vehicleDisplayName(input: Pick<CopyInput, "vehicle" | "make" | "
   return [tidy(input.make), tidy(input.series)].filter(Boolean).join(" ") || "your vehicle";
 }
 
+const BODY_WORDS = /\b(ute|utility|sedan|wagon|van|coupe|cab chassis|panel van|station wagon)\b/gi;
+
+/** Shop search should be make + model, e.g. "Holden Kingswood", not the series codes or body style. */
+export function vehicleSearchKeyword(input: { vehicle?: string | null; make?: string | null; model?: string | null; series?: string | null }) {
+  const make = tidy(input.make);
+  const model = tidy(input.model);
+  if (make && model && model.toLowerCase() !== make.toLowerCase()) return `${make} ${model}`;
+  const series = tidy(input.series);
+  let cleaned = tidy(input.vehicle);
+  if (series) cleaned = cleaned.replace(new RegExp(`\\b${series.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i"), " ");
+  cleaned = cleaned.replace(BODY_WORDS, " ").replace(/\s+/g, " ").trim();
+  if (cleaned && cleaned.toLowerCase() !== "your vehicle") return cleaned;
+  return [make, model].filter(Boolean).join(" ");
+}
+
 export function seriesDisplayName(input: Pick<CopyInput, "vehicle" | "make" | "series">) {
   return tidy(input.series) || vehicleDisplayName(input);
 }

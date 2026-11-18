@@ -1,6 +1,6 @@
 import type { EmailCopy, TemplateVariables } from "@/types";
-import { professionalEmailCopy } from "@/lib/email/copy";
-import { applyTemplate, renderEmailHtml } from "@/lib/email/provider";
+import { professionalEmailCopy, vehicleSearchKeyword } from "@/lib/email/copy";
+import { applyTemplate, renderEmailHtml, shopKeywordSearchUrl } from "@/lib/email/provider";
 import { firstNameFrom } from "@/lib/utils";
 import { readEnv } from "@/lib/read-env";
 
@@ -133,6 +133,7 @@ export async function generatePersonalizedEmail(input: {
   customerName: string;
   vehicle: string;
   make: string;
+  model?: string | null;
   series: string;
   purchasedProduct: string;
   products: Array<{ name: string; url: string; price?: string | null; imageUrl?: string | null }>;
@@ -167,7 +168,14 @@ export async function generatePersonalizedEmail(input: {
     greeting: applyTemplate(copy.greeting, vars),
     body: applyTemplate(copy.body, vars),
     ctaLabel: applyTemplate(copy.ctaLabel, vars),
-    ctaUrl: applyTemplate(copy.ctaUrl || "{{shop_url}}", vars) || input.shopUrl || "#",
+    ctaUrl:
+      shopKeywordSearchUrl(
+        input.shopUrl,
+        vehicleSearchKeyword({ vehicle: input.vehicle, make: input.make, model: input.model, series: input.series }),
+      ) ||
+      applyTemplate(copy.ctaUrl || "{{shop_url}}", vars) ||
+      input.shopUrl ||
+      "#",
     footer: applyTemplate(copy.footer, vars),
   };
   return { ...resolved, html: renderEmailHtml(resolved, input.products, { logoUrl: input.logoUrl }) };

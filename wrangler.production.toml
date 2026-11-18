@@ -1,0 +1,35 @@
+# Production: Allen Pinto's Cloudflare account (Workers Paid)
+account_id = "0b0620df66f8ee96d469124b5359211b"
+name = "aveska"
+main = "src/worker.ts"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/t/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "aveska"
+database_id = "0a068a7b-346b-42e9-8371-7473326841ba"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "UPLOADS"
+bucket_name = "aveska-uploads"
+
+[triggers]
+crons = ["* * * * *"]
+
+[observability]
+enabled = true
+
+[vars]
+EMAIL_PROVIDER = "resend"
+NEXT_PUBLIC_APP_NAME = "Aveska Intelligence"
+NEXT_PUBLIC_COMPANY_NAME = "Aveska"
+MAX_UPLOAD_MB = "25"
+AVESKA_RUNTIME = "worker"

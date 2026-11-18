@@ -20,7 +20,9 @@
     "worker": "tsx src/lib/jobs/worker.ts",
     "cf:migrate:local": "wrangler d1 migrations apply DB --local",
     "cf:migrate": "wrangler d1 migrations apply DB --remote",
+    "cf:migrate:prod": "wrangler d1 migrations apply DB --remote --config wrangler.production.toml",
     "deploy": "npm run build && wrangler deploy",
+    "deploy:prod": "npm run build && wrangler deploy --config wrangler.production.toml",
     "track:tunnel": "tsx scripts/tracking-tunnel.ts"
   },
   "prisma": {

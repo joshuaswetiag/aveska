@@ -63,6 +63,19 @@ function httpUrl(value: string | null | undefined) {
   return /^https?:\/\//i.test(trimmed) ? trimmed : "";
 }
 
+export function shopKeywordSearchUrl(shopUrl: string | null | undefined, keyword: string) {
+  const query = keyword.replace(/\s+/g, " ").trim();
+  if (!query) return "";
+  const base = httpUrl(shopUrl) || "https://www.aveska.com.au";
+  const url = new URL(base);
+  url.pathname = "/";
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("rf", "kw");
+  url.searchParams.set("kw", query);
+  return url.toString();
+}
+
 function productLink(
   products: Array<{ url: string }>,
   ctaUrl: string,
@@ -73,8 +86,11 @@ function productLink(
   try {
     const parsed = new URL(cta);
     const host = parsed.hostname.toLowerCase();
-    const home = (host === "aveska.com.au" || host === "www.aveska.com.au") && (parsed.pathname === "/" || parsed.pathname === "");
-    if (home && product) return product;
+    const bareHome =
+      (host === "aveska.com.au" || host === "www.aveska.com.au") &&
+      (parsed.pathname === "/" || parsed.pathname === "") &&
+      !parsed.search;
+    if (bareHome && product) return product;
   } catch {
     return product || cta;
   }

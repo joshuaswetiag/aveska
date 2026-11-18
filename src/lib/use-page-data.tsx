@@ -30,13 +30,14 @@ export function usePageData<T>(path: string | null, options?: { search?: boolean
             return;
           }
           if (!res.ok) {
-            setLoaded({ url, data: null, status: "error" });
+            setLoaded((current) => (current?.url === url && current.data != null ? current : { url, data: null, status: "error" }));
             return;
           }
           setLoaded({ url, data: (await res.json()) as T, status: "ready" });
         })
         .catch(() => {
-          if (!cancelled) setLoaded({ url, data: null, status: "error" });
+          if (cancelled) return;
+          setLoaded((current) => (current?.url === url && current.data != null ? current : { url, data: null, status: "error" }));
         });
     };
 

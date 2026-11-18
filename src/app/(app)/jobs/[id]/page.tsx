@@ -34,14 +34,17 @@ type JobRow = {
 export default function JobPage() {
   const { id } = useParams();
   const state = usePageData<JobRow>(id ? `/api/views/jobs/${id}` : null, { search: false });
+  const job = state.data;
+  const polling = Boolean(id) && state.status !== "missing" && job?.status !== "COMPLETED" && job?.status !== "FAILED" && job?.status !== "CANCELLED";
   return (
-    <PageState {...state}>
+    <>
+      {polling ? <JobPoller id={id as string} status={job?.status ?? "RUNNING"} /> : null}
+      <PageState {...state}>
       {(job) => {
         const pct = job.total ? Math.round((job.progress / job.total) * 100) : job.status === "COMPLETED" ? 100 : 0;
         const result = job.result;
         return (
           <div className="space-y-6">
-            <JobPoller id={job.id} status={job.status} />
             <div>
               <h1 className="font-display text-3xl font-semibold">{job.type.replaceAll("_", " ")}</h1>
               <p className="mt-1 text-muted-foreground">
@@ -87,6 +90,7 @@ export default function JobPage() {
           </div>
         );
       }}
-    </PageState>
+      </PageState>
+    </>
   );
 }
